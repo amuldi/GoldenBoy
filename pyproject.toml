@@ -11,7 +11,11 @@ authors = [
     { name = "Golden Boy Contributors" }
 ]
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "tiktoken>=0.7.0",
+    "openai>=1.0.0",
+    "anthropic>=0.3.0"
+]
 
 [project.scripts]
 goldenboy = "goldenboy.cli:main"
