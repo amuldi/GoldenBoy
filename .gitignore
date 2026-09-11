@@ -1,0 +1,6 @@
+venv/
+venv2/
+__pycache__/
+*.pyc
+.goldenboy/
+.pytest_cache/

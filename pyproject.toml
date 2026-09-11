@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "goldenboy"
+version = "0.1.0"
+description = "A budget-aware execution layer for AI coding agents."
+readme = "README.md"
+authors = [
+    { name = "Golden Boy Contributors" }
+]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+goldenboy = "goldenboy.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["goldenboy"]
