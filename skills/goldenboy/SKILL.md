@@ -23,10 +23,34 @@ When you analyze a user request, mentally break it down into these priorities:
 - **P4**: Nice to have (documentation, cleanup).
 
 ## Execution Modes
-Determine your execution mode based on the current context:
+Determine your execution mode based on the current context. These match the
+modes implemented in `goldenboy.core.risk.ExecutionMode` — keep the two in
+sync if either changes:
 - **SAFE**: You have plenty of context/budget. Execute P0-P4 normally.
-- **LIMITED**: The task is very large. Execute P0 and P1. Explicitly inform the user that P2-P4 are deferred.
-- **CRITICAL**: The context/budget is almost exhausted. Finish the current P0 unit, output a checkpoint artifact, and stop execution immediately.
+- **CAUTION**: Budget is sufficient but the task's estimated cost is a
+  significant fraction of it. Keep going, but reduce unnecessary exploration
+  and avoid opening scope you don't need.
+- **LIMITED**: The task is very large relative to what's left. Execute P0
+  and P1. Explicitly inform the user that P2-P4 are deferred.
+- **CRITICAL**: The context/budget is almost exhausted. Finish the current
+  P0 unit, output a checkpoint artifact, and stop execution immediately.
+
+## Reading remaining budget in Claude Code
+
+In Claude Code specifically, the harness injects the remaining-usage figure
+directly into context as a system-reminder, e.g.:
+
+```
+<system-reminder>
+<total_tokens>15000000 tokens left</total_tokens>
+</system-reminder>
+```
+
+Read that value directly rather than guessing — it is the concrete,
+verifiable signal this skill's execution-mode judgment should be based on
+for Claude Code sessions. Other agents expose usage differently (or not at
+all); when no such signal is available, do not fabricate a percentage —
+treat usage as UNKNOWN and default to CAUTION rather than SAFE.
 
 ## Instructions
 

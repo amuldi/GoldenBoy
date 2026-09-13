@@ -7,23 +7,77 @@ name = "goldenboy"
 version = "0.1.0"
 description = "A budget-aware execution layer for AI coding agents."
 readme = "README.md"
+license = { text = "MIT" }
 authors = [
     { name = "Golden Boy Contributors" }
 ]
 requires-python = ">=3.9"
-dependencies = [
-    "tiktoken>=0.7.0",
-    "openai>=1.0.0",
-    "anthropic>=0.3.0"
+dependencies = []
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
+
+[project.urls]
+Homepage = "https://github.com/amuldi/GoldenBoy"
+Repository = "https://github.com/amuldi/GoldenBoy"
+Issues = "https://github.com/amuldi/GoldenBoy/issues"
+Changelog = "https://github.com/amuldi/GoldenBoy/blob/main/CHANGELOG.md"
 
 [project.scripts]
 goldenboy = "goldenboy.cli:main"
 
 [project.optional-dependencies]
+# tiktoken gives exact token counts for the Estimator; without it, a word-count
+# heuristic is used instead (lower confidence, reported as such).
+tiktoken = ["tiktoken>=0.7.0"]
+# Only needed if you use AnthropicAdapter / OpenAIAdapter to read rate-limit
+# headers. The core library, CLI (mock provider), and SKILL.md workflow
+# don't require either.
+anthropic = ["anthropic>=0.3.0"]
+openai = ["openai>=1.0.0"]
 dev = [
     "pytest",
+    "pytest-cov",
+    "ruff",
+    "mypy",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["goldenboy"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.ruff.lint]
+# Real-bug + hygiene rules only (unused/undefined names, import order,
+# pycodestyle errors) -- not the full opinionated rule set, to keep CI
+# lint meaningful without turning it into a style-rewrite gate.
+select = ["E", "F", "I"]
+
+[tool.mypy]
+# The installed mypy no longer supports checking *against* the 3.9 target
+# itself (dropped as a checkable --python-version); requires-python above
+# stays >=3.9. 3.9 compatibility is otherwise covered by ruff's
+# target-version=py39 and manual review -- there's no 3.10+-only syntax
+# in this codebase (no `X | None`, no `match`, etc.).
+python_version = "3.10"
+files = ["goldenboy"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# anthropic/openai/tiktoken are optional extras -- CI's default install
+# (and many contributors' envs) won't have them, so missing-import errors
+# for these three specifically are expected, not a real type issue.
+[[tool.mypy.overrides]]
+module = ["anthropic.*", "openai.*", "tiktoken.*"]
+ignore_missing_imports = true

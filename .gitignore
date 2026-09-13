@@ -4,3 +4,10 @@ __pycache__/
 *.pyc
 .goldenboy/
 .pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.env
+.coverage
+.mypy_cache/

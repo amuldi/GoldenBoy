@@ -1,30 +1,15 @@
-import os
+"""Thin convenience wrapper around pytest.
+
+This used to hand-list every test function and call them one by one,
+which meant it silently stopped covering new tests the moment someone
+added a file under tests/ without also editing this file. pytest (already
+a `dev` extra in pyproject.toml) discovers tests on its own — this script
+just exists for `python run_tests.py` muscle memory; `pytest` directly
+works identically and is the canonical way to run the suite.
+"""
 import sys
 
-# Add current directory to path
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-
-def run_tests():
-    # test_budget
-    from tests import test_budget
-    test_budget.test_budget_usable_percentage()
-    test_budget.test_budget_exhausted()
-    test_budget.test_budget_is_safe()
-    
-    # test_executor
-    from tests import test_executor
-    test_executor.test_executor_safe_mode()
-    test_executor.test_executor_limited_mode()
-    test_executor.test_executor_critical_mode()
-    
-    # test_checkpoint
-    from tests import test_checkpoint
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_checkpoint.test_checkpoint_save_load(tmpdir)
-        test_checkpoint.test_checkpoint_clear(tmpdir)
-        
-    print("All tests passed successfully.")
+import pytest
 
 if __name__ == "__main__":
-    run_tests()
+    sys.exit(pytest.main(["tests/"] + sys.argv[1:]))

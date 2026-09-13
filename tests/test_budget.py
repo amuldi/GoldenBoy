@@ -1,5 +1,6 @@
 from goldenboy.core.budget import Budget
 
+
 def test_budget_usable_percentage():
     b = Budget(remaining_percentage=15.0, safety_margin=3.0)
     assert b.usable_percentage == 12.0
