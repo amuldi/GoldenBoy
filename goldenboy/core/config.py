@@ -153,13 +153,21 @@ class GoldenBoyConfig:
             raw = os.getenv(env_name)
             if raw is None:
                 continue
-            if fld.type in (int, float):
+            # dataclasses.Field.type is typed as `type | str` (it can be a
+            # string if annotations were ever stringified) -- the explicit
+            # isinstance narrows that away for the type checker. Every
+            # mypy version handles isinstance narrowing consistently, which
+            # `fld.type in (int, float)` alone did not (see CHANGELOG: this
+            # exact line failed under mypy 1.19.1, the version pip resolves
+            # for Python 3.9, while passing under a newer local mypy).
+            caster = fld.type if isinstance(fld.type, type) else None
+            if caster in (int, float):
                 try:
-                    values[fld.name] = fld.type(raw)
+                    values[fld.name] = caster(raw)
                 except ValueError as e:
                     raise ConfigError(
                         f"Environment variable {env_name}={raw!r} is not a valid "
-                        f"{fld.type.__name__}."
+                        f"{caster.__name__}."
                     ) from e
             else:
                 values[fld.name] = raw

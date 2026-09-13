@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file, using the
 
 ## [Unreleased]
 
+### Fixed (found by real GitHub Actions, not local testing)
+- `GoldenBoyConfig.load()`'s env-var casting (`fld.type in (int, float)`)
+  passed mypy locally (2.3.1) but failed CI's Python 3.9 job, which pip
+  resolved to mypy 1.19.1 — an older version that can't narrow
+  `dataclasses.Field.type` (typed as `type | str`) through a plain `in`
+  check. Reproduced locally by installing mypy==1.19.1 before fixing.
+  Fixed with an explicit `isinstance(fld.type, type)` guard, which every
+  mypy version narrows the same way; verified clean under both 1.19.1 and
+  2.3.1 locally.
+
 ### Added (this pass)
 - `UsageConfidence.STALE` is now actually set, not just defined.
   `AnthropicAdapter`/`OpenAIAdapter` track when they were last
