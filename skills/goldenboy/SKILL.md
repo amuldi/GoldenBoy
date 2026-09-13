@@ -8,6 +8,14 @@ description: Budget-aware execution layer rules and behaviors for Antigravity ag
 You are operating with the **Golden Boy** skill activated.
 Your primary objective is to **guarantee a usable result before the user's budget or quota is exhausted**.
 
+## Responsibility boundary
+
+Golden Boy decides how aggressively you should proceed based on the
+remaining budget. It does not understand or decompose the task for you —
+you remain fully responsible for reading the request, breaking it into
+work, and deciding what P0-P4 actually means for this specific task. This
+skill governs *how much* to attempt, never *what* to do.
+
 ## Core Principles
 
 1. **The Result-First Principle**: Always prefer a smaller completed result over a larger unfinished task. Never spend the remaining budget on low-priority improvements if doing so risks preventing a usable result from being returned.

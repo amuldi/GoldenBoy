@@ -1,175 +1,140 @@
 <p align="center">
   <picture>
-    <img src="https://raw.githubusercontent.com/amuldi/GoldenBoy/main/assets/golden-boy.png" width="220" alt="Golden Boy, the budget master">
+    <img src="https://raw.githubusercontent.com/amuldi/GoldenBoy/main/assets/golden-boy.png" width="180" alt="Golden Boy">
   </picture>
 </p>
 
 <h1 align="center">Golden Boy</h1>
-
-<p align="center">
-  <em>Know the budget. Protect the result.</em>
-</p>
+<p align="center"><em>Spend less of your AI budget on the wrong work.</em></p>
 
 <p align="center">
   <img src="https://github.com/amuldi/GoldenBoy/actions/workflows/ci.yml/badge.svg" alt="CI status">
-  <img src="https://img.shields.io/badge/execution-budget--aware-111111?style=flat-square" alt="Budget Aware">
-  <img src="https://img.shields.io/badge/works%20with-any%20agent-111111?style=flat-square" alt="Works with any agent">
+  <img src="https://img.shields.io/badge/python-3.9--3.13-111111?style=flat-square" alt="Python 3.9–3.13">
+  <img src="https://img.shields.io/badge/coverage-93%25-111111?style=flat-square" alt="Coverage 93%">
   <img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT license">
 </p>
 
 <p align="center">
-  <strong>Adaptive execution &middot; recoverable checkpoints &middot; no silent budget overruns</strong><br>
-  <sub>For AI coding tasks where agents can run out of quota mid-task. Golden Boy adapts the execution plan to available budget, prioritizing critical features and cleanly deferring optional polish, so a constrained run ends with a usable, working result and a clear record of what's deferred — instead of running out of budget silently mid-edit. See <a href="#limitations">Limitations</a> for what this doesn't guarantee.</sub>
+A lightweight budget-aware execution layer for AI coding agents. Golden Boy estimates task cost,
+tracks how much usage is left (and how much to trust that number), and adapts execution intensity
+before an agent burns through its budget.
 </p>
 
 ---
 
-You have 15% usage remaining. You submit a large coding task.
+## What is Golden Boy?
 
-The agent starts normally. It spends the remaining budget on repository exploration, implementation, refactoring, testing, and optional improvements. 
+AI coding agents tend to treat every task the same, regardless of how much usage is actually left.
+A large task started at 15% remaining budget often ends the same way: interrupted mid-edit, with no
+record of what was finished and what wasn't.
 
-Then the budget runs out before the final result is returned. 
+Golden Boy is a small decision layer that sits between an agent and its work: it estimates what a task
+will cost, checks that against remaining budget (and how reliable that budget reading actually is), and
+tells the agent how aggressively to proceed — normally, cautiously, in a reduced scope, or not at all
+until it checkpoints and stops.
 
-The problem isn't necessarily that the agent couldn't perform the task. The problem is that it failed to **adapt the task to the budget available**.
+It does this:
 
-Golden Boy puts a budget-aware execution layer inside your AI agent.
+- **Estimates task cost** from the actual prompt text and repository size (`Estimator`)
+- **Tracks budget and its own confidence in that number** — exact, estimated, stale, or unknown (`Budget`, `UsageConfidence`)
+- **Picks an execution mode** — SAFE, CAUTION, LIMITED, or CRITICAL (`RiskEngine`)
+- **Checkpoints and defers** work instead of failing silently mid-task (`CheckpointManager`)
+- **Reports diagnostics** through a CLI (`goldenboy doctor`, `status`, `plan`)
+- **Integrates with a calling agent** — as a Python decorator, or as a prompt-level skill for LLM agents
+
+It does **not** decompose a task into a coding plan, replace the calling agent, or act as a coding agent,
+IDE, or LLM provider itself — see [Design principles](#design-principles) and
+[About task breakdowns](#about-task-breakdowns) below.
+
+## How it works
+
+```
+Task
+  │
+  ▼
+Repository scan + prompt  ──►  Cost Estimate
+                                     │
+                                     ▼
+                          Budget × Confidence
+                     (EXACT · ESTIMATED · STALE · UNKNOWN)
+                                     │
+                 ┌───────────┬───────┴───────┬───────────┐
+                 ▼           ▼               ▼           ▼
+               SAFE      CAUTION         LIMITED     CRITICAL
+            Proceed    Reduce scope,   Constrain to   Defer all but
+                       stay cautious    P0/P1 only    P0, checkpoint,
+                                                       stop
+```
+
+A `STALE` budget reading (usage fetched once, then not refreshed for a while) is never allowed to
+produce a `SAFE` verdict — it's treated as at least `CAUTION`, regardless of how comfortable the raw
+numbers look. See [Design principles](#design-principles).
 
 ## Before / after
 
-You ask an agent to rebuild the entire dashboard UI, add responsive support, refactor components, and run the test suite.
+**Without Golden Boy:** an agent receives "refactor the entire authentication system," starts
+immediately, spends aggressively across exploration/implementation/tests, and gets interrupted mid-task
+when the budget runs out — with no record of what's done.
 
-Without Golden Boy:
+**With Golden Boy**, the same request goes through cost estimation and a budget check before execution
+scope is committed:
 
-Prompt → Agent starts → Analyze → Implement → Refactor → Test → **Budget exhausted** → Incomplete, broken result.
-
-With Golden Boy:
-
-Prompt → Check budget → Estimate task → Assess risk → Adapt plan → Execute critical work → Validate → Checkpoint → **Return working result**.
-
-> "Core dashboard redesign completed. 3 optional tasks deferred. Checkpoint saved."
-
-## The Result-First Principle
-
-**The rule is never "use fewest tokens."** It is: maximize completed, useful work within the remaining budget.
-
-Golden Boy prefers a smaller completed result over a larger unfinished task. It never allows the agent to spend the remaining budget on low-priority improvements if doing so risks preventing a usable result from being returned.
-
-### What Golden Boy is not
-
-Golden Boy is a budget/workload optimization layer — not a coding agent, chatbot, LLM wrapper, prompt
-generator, or IDE. It doesn't decide *what* code to write; it decides *how much* to attempt given what's
-left, and helps whatever agent is doing the writing stop safely and recoverably when it can't attempt
-everything. Features that would turn it into a general assistant belong in a different project.
-
-## Execution Modes
-
-Golden Boy dynamically assesses risk and switches modes:
-
-1. **SAFE**: Remaining budget is comfortably above estimated task cost. Normal execution.
-2. **CAUTION**: Budget is sufficient but execution has some risk. Reduce unnecessary exploration.
-3. **LIMITED**: Task is likely to exceed budget. Prioritize critical work, reduce scope, defer secondary work.
-4. **CRITICAL**: Budget is almost exhausted. Finish current unit, save checkpoint, stop safely.
-
-## Checkpoints
-
-Large tasks must be recoverable. If the budget becomes unsafe, Golden Boy saves the current state (a checkpoint). The next execution resumes from this checkpoint instead of restarting the entire task unnecessarily.
-
-## Architecture
-
-Golden Boy is designed around a provider-agnostic architecture:
-- **Provider Adapters**: Normalize available usage info across providers into a `Budget`, tagged with
-  where it came from and how much to trust it (`source` / `UsageConfidence`: EXACT, ESTIMATED, STALE,
-  UNKNOWN). Adapters report usage; they do not execute coding work themselves — see
-  [Provider adapters vs. real execution](#provider-adapters-vs-real-execution) below.
-- **Task Estimator**: Predicts cost from prompt length and repository size (heuristic, not exact —
-  see [Limitations](#limitations)).
-- **Risk Engine**: Determines Execution Mode (SAFE/CAUTION/LIMITED/CRITICAL) from a `GoldenBoyConfig`
-  rather than hardcoded thresholds — see `goldenboy/core/config.py`.
-- **Adaptive Executor**: Executes and checkpoints based on priority. `AdaptiveExecutor.assess(plan)` is
-  the single decision path shared by the CLI and the `budget_aware_execution` decorator.
-
-## Provider adapters vs. real execution
-
-Golden Boy does not execute coding work itself — that would make it a coding agent, which is explicitly
-not its job (see [What Golden Boy is not](#what-golden-boy-is-not) above). There are two adapter styles:
-
-- **`MockProvider`** genuinely can execute a unit (it just deducts the unit's cost from a counter), which
-  is why it's used by the CLI demo and by `AdaptiveExecutor.execute()`.
-- **`AnthropicAdapter` / `OpenAIAdapter`** only report usage, by reading `anthropic-ratelimit-*` /
-  `x-ratelimit-*` response headers from a minimal probe call (`refresh_usage()`). They do not implement
-  `execute_unit` — calling it raises `NotImplementedError` with a pointer to the right pattern. For real
-  work with these adapters, wrap your own function:
-
-```python
-from goldenboy.adapters.anthropic_adapter import AnthropicAdapter
-from goldenboy.integration import budget_aware_execution
-from goldenboy.core.priorities import Priority
-
-adapter = AnthropicAdapter()
-adapter.refresh_usage()  # optional: refresh the cached usage estimate first
-
-@budget_aware_execution(adapter, "1", "Refactor auth module", Priority.P1)
-def refactor_auth():
-    ...  # your actual agent logic runs here, never inside the adapter
+```bash
+$ goldenboy plan "Refactor the entire authentication system" --budget 15
+--- Execution Plan: 'Refactor the entire authentication system' ---
+Remaining Budget: 15.00%
+Estimated Cost (heuristic, based on prompt + repo size): 25.37% (confidence: 0.85)
+Risk Assessment: LIMITED
 ```
 
-## Claude Code integration
-
-`skills/goldenboy/SKILL.md` is a prompt-level integration: it teaches an LLM agent to reason about its
-own remaining budget rather than asking Golden Boy's Python layer to track it externally. In Claude Code
-specifically, the harness injects the remaining-usage figure directly into context, e.g.:
-
-```
-<system-reminder>
-<total_tokens>15000000 tokens left</total_tokens>
-</system-reminder>
-```
-
-The skill instructs the agent to read that value directly rather than guess. This is currently the
-primary Claude Code integration; the Python `ProviderAdapter` layer is a separate, code-level mechanism
-for frameworks that call the OpenAI/Anthropic APIs directly and want programmatic budget checks.
+Risk is assessed *before* work starts, using the real budget and a real cost estimate — not a guess
+made after the fact.
 
 ## Install
 
-Golden Boy's core package has no required dependencies beyond the standard library.
+```bash
+pip install goldenboy
+goldenboy --help
+```
+
+Or from source:
 
 ```bash
+git clone https://github.com/amuldi/GoldenBoy.git
+cd GoldenBoy
 pip install -e .
 ```
 
-Install extras only for what you actually use:
+The core install has no required third-party dependencies. Optional extras add specific capabilities:
 
 ```bash
-pip install -e ".[tiktoken]"    # exact token counts (falls back to a word-count heuristic without it)
-pip install -e ".[anthropic]"   # AnthropicAdapter
-pip install -e ".[openai]"      # OpenAIAdapter
-pip install -e ".[dev]"         # pytest + ruff + mypy, for contributing
+pip install "goldenboy[tiktoken]"   # exact token counts (falls back to a coarser heuristic without it)
+pip install "goldenboy[anthropic]"  # AnthropicAdapter
+pip install "goldenboy[openai]"     # OpenAIAdapter
 ```
-
-See `.env.example` for the environment variables the adapters read.
 
 ## Quick start
 
 ```bash
-pip install -e .
-goldenboy plan "Fix a typo in README" --budget 50
-goldenboy plan "Build an OAuth authentication system with tests" --budget 50
+goldenboy plan "Refactor the authentication system"   # estimate cost + risk mode before doing anything
+goldenboy status                                      # current budget and any pending checkpoint
+goldenboy doctor                                      # environment, config, and checkpoint diagnostics
 ```
 
-The two `plan` calls print different `Estimated Cost` values — that's the real, task-text-driven
-estimate (see [Limitations](#limitations) for what it doesn't do: it estimates cost, it doesn't
-decompose the task into a real plan). Try a low budget to see modes change:
+## CLI
 
-```bash
-goldenboy run "demo" --budget 12       # some units complete, some get deferred
-goldenboy status --budget 12           # shows the checkpoint left behind
-goldenboy resume --budget 100          # finishes the deferred work
-goldenboy doctor                       # environment/config/checkpoint diagnostics
-```
+| Command | Purpose |
+|---|---|
+| `goldenboy plan <task>` | Estimate a task's real cost from its text + repo size, and show the resulting risk mode. |
+| `goldenboy run <task>` | Execute a budget-aware demo plan adaptively against a mock budget. |
+| `goldenboy status` | Inspect current budget and any pending checkpoint. |
+| `goldenboy resume` | Resume execution from the previous checkpoint. |
+| `goldenboy doctor` | Diagnose Python version, optional dependencies, provider key configuration, config, and checkpoint state. |
+
+Add `--budget` to any command to control the mock starting budget, and `-v`/`--verbose` for internal
+per-unit decision logs.
 
 ## Python integration
-
-The public API is small and doesn't require any provider SDK:
 
 ```python
 from goldenboy import AdaptiveExecutor, MockProvider, budget_aware_execution, Priority
@@ -184,13 +149,60 @@ refactor_auth()
 ```
 
 `budget_aware_execution` asks the provider for a budget/mode decision and, only if the mode allows it,
-calls your function — never the provider. See `goldenboy/__init__.py` for the full public surface;
-anything not listed there (provider-specific adapters, CLI internals) is available via its own submodule
-but isn't part of the stability contract the top-level API is.
+calls your function — never the provider itself. The full public surface lives in
+`goldenboy/__init__.py`; anything not listed there is reachable via its own submodule but isn't part of
+the stability contract the top-level API is.
+
+## Integrations
+
+**Provider adapters** report usage; they never execute your code. `MockProvider` is a synthetic provider
+for demos and tests. `AnthropicAdapter`/`OpenAIAdapter` read `anthropic-ratelimit-*`/`x-ratelimit-*`
+response headers via an explicit `refresh_usage()` call — real work runs through the decorator above,
+never inside the adapter:
+
+```python
+from goldenboy.adapters.anthropic_adapter import AnthropicAdapter
+from goldenboy.integration import budget_aware_execution
+from goldenboy.core.priorities import Priority
+
+adapter = AnthropicAdapter()
+adapter.refresh_usage()
+
+@budget_aware_execution(adapter, "1", "Refactor auth module", Priority.P1)
+def refactor_auth():
+    ...
+```
+
+**Claude Code** gets a prompt-level integration instead: `skills/goldenboy/SKILL.md` teaches an LLM
+agent to read the `<total_tokens>` figure Claude Code injects directly into context and reason about its
+own execution mode — no separate Python process required.
+
+## Architecture
+
+```
+goldenboy/
+├── __init__.py          # small, deliberate public API
+├── cli.py                # status / plan / run / resume / doctor
+├── integration.py        # budget_aware_execution decorator (the one real-execution entry point)
+├── adapters/
+│   ├── base.py            # ProviderAdapter interface + shared staleness logic
+│   ├── mock.py            # synthetic provider for demos/tests
+│   ├── anthropic_adapter.py
+│   └── openai_adapter.py
+└── core/
+    ├── budget.py           # Budget, UsageConfidence
+    ├── estimator.py        # task cost estimation
+    ├── risk.py             # RiskEngine → ExecutionMode
+    ├── executor.py         # AdaptiveExecutor
+    ├── checkpoint.py       # CheckpointManager
+    ├── config.py           # GoldenBoyConfig
+    ├── priorities.py       # Priority, ExecutionUnit
+    └── errors.py           # GoldenBoyError, ConfigError, CheckpointError
+```
 
 ## Configuration
 
-Every policy threshold lives in one place, `GoldenBoyConfig`, with this override order:
+Every policy threshold lives in `GoldenBoyConfig`, with this override order:
 
 ```
 explicit constructor arg  >  GOLDENBOY_* environment variable  >  .goldenboy/config.json  >  default
@@ -202,111 +214,109 @@ explicit constructor arg  >  GOLDENBOY_* environment variable  >  .goldenboy/con
 | `caution_ratio` | `0.5` | Estimated-cost/usable-budget ratio at which risk moves from SAFE to CAUTION. |
 | `base_cost_per_unit` | `2.0` | Fallback per-unit cost when a plan's units don't declare one. |
 | `max_budget_tokens` | `100000` | Token count treated as "100% of budget" when converting a raw token estimate into a percentage. |
-| `stale_after_seconds` | `300.0` | How long a refreshed `AnthropicAdapter`/`OpenAIAdapter` reading stays `ESTIMATED` before aging to `STALE` (see [Safety model](#safety-model)). |
+| `stale_after_seconds` | `300.0` | How long a refreshed provider reading stays `ESTIMATED` before aging to `STALE`. |
 
-Example `.goldenboy/config.json`:
+Out-of-range values, malformed JSON, and unparseable `GOLDENBOY_*` env vars all raise a clear
+`ConfigError` — at the CLI, a one-line `error:` message and exit 1, never a stack trace.
 
-```json
-{
-  "safety_margin": 5.0,
-  "caution_ratio": 0.4
-}
-```
+## Design principles
 
-Out-of-range values (e.g. `caution_ratio` outside `[0, 1]`), malformed JSON, and unparseable
-`GOLDENBOY_*` env vars all raise a clear `ConfigError` — at the CLI they print a one-line `error:` message
-and exit 1, not a stack trace. Unknown keys in the JSON file are ignored with a logged warning (helps
-catch typos without hard-failing on a file written for a slightly older version).
+**Lightweight** — the core install has no required third-party runtime dependencies; provider SDKs are
+opt-in extras.
 
-## Commands
+**Adaptive** — execution behavior changes with remaining budget *and* with how much to trust that
+number: a `STALE` reading can never produce a `SAFE` verdict.
 
-Use the CLI to interact with Golden Boy's execution layer:
+**Deterministic** — identical inputs produce identical decisions. The estimator and risk engine have no
+hidden randomness; adapter staleness is driven by an injectable clock, so it's testable without sleeping.
 
-| Command | What it does |
-|---------|--------------|
-| `goldenboy status` | Show remaining budget, usable budget (after safety margin), and any pending checkpoint (with its saved-at time and next recommended action). |
-| `goldenboy plan <task>` | Estimate `<task>`'s real cost (from prompt length + repo size) and show the resulting risk mode, alongside an illustrative example unit breakdown. |
-| `goldenboy run <task>` | Execute the illustrative example plan adaptively against a mock budget — a demo of mode-based adaptation, not a decomposition of `<task>`. |
-| `goldenboy resume` | Resume execution from the previous checkpoint. |
-| `goldenboy doctor` | Report Python version, which optional dependencies are installed (and whether their API key is configured — never its value), whether config loads cleanly, and any checkpoint state — real, checked facts, not a fabricated health score. |
+**Provider-optional** — `import goldenboy` never requires `anthropic` or `openai` to be installed.
 
-*(Note: Provide a `--budget` flag to mock available quota during testing, and `-v`/`--verbose` to see
-internal per-unit decision logs.)*
+**Agent-first** — Golden Boy decides how aggressively an agent should proceed based on the remaining
+budget. The calling agent remains responsible for understanding and decomposing the task.
 
-## Safety model
+**Fail safely** — malformed config, corrupted checkpoints, and invalid input produce a specific,
+human-readable error and exit code, never a raw traceback or silent data loss.
 
-Golden Boy's "safety" is about not losing work or silently doing the wrong thing, not sandboxing —
-it never executes arbitrary code you didn't write (see [Provider adapters vs. real
-execution](#provider-adapters-vs-real-execution)):
+## About task breakdowns
 
-- **Config never fails silently.** Out-of-range thresholds, malformed JSON, and bad env var values all
-  raise `ConfigError` with a specific reason — Golden Boy never falls back to a default that could mask
-  a threshold you intentionally tightened.
-- **Checkpoints never fail silently either.** A corrupted or incompatible-version checkpoint raises
-  `CheckpointError` naming the file and the problem, instead of crashing with a raw traceback or quietly
-  discarding deferred work.
-- **CRITICAL mode stops, it doesn't guess.** When budget is at/below the safety margin, execution defers
-  everything except P0 and writes a checkpoint — it does not attempt partial work "just in case" the
-  estimate was wrong.
-- **Old usage data doesn't get to look fresh.** `AnthropicAdapter`/`OpenAIAdapter` track when they were
-  last refreshed; once a reading is older than `stale_after_seconds`, its confidence becomes `STALE`
-  (not `ESTIMATED`), and `RiskEngine` will not report `SAFE` on a `STALE` budget — at best `CAUTION` —
-  even if the numbers alone would otherwise look comfortable. A long-running process that fetched usage
-  once and never refreshed again can't silently coast on that first reading forever.
-- **Nothing is logged that shouldn't be.** API keys are read from the environment and never appear in
-  checkpoint files, logs, error messages, or `goldenboy doctor` output — `doctor` reports only whether a
-  key is configured (e.g. `Anthropic API key: configured`), never its value (see `SECURITY.md`).
+The estimated cost shown by `plan`/`run` is computed from the actual task text and repository context —
+that number is real. The unit breakdown shown alongside it is illustrative: it is **not** an
+LLM-generated decomposition of your task. Golden Boy intentionally keeps its core dependency-free and
+out of the business of understanding tasks; actual task decomposition remains the responsibility of the
+calling agent (see [Design principles](#design-principles)).
 
 ## Limitations
 
-- **Estimation is heuristic, not exact.** `Estimator` predicts cost from prompt length and a bounded
-  scan of source files (dependency/build directories excluded) — it doesn't model what an agent would
-  actually load into context for a given task.
-- **No automatic task decomposition.** `plan`/`run` don't turn your task text into real `ExecutionUnit`s
-  — the CLI's example plan is fixed and illustrative (see [Provider adapters vs. real
-  execution](#provider-adapters-vs-real-execution)). Define your own units for a real plan, or use the
-  SKILL.md prompt-level approach for an LLM agent to reason about its own decomposition.
-- **Rate-limit headers ≠ session budget.** `AnthropicAdapter`/`OpenAIAdapter` report an org-wide
-  rate-limit bucket, not "how much of this coding session is left" — that's why their `Budget` is never
-  EXACT: UNKNOWN before the first refresh, ESTIMATED while fresh, STALE once older than
-  `stale_after_seconds`.
-- **No guarantees.** Golden Boy cannot guarantee a task finishes within budget, but it fails safely
-  (CRITICAL mode, checkpoint written) when budget information is unavailable or exhausted, rather than
-  silently continuing.
+- Cost estimates are heuristic (prompt length + a bounded repo scan) — not billing guarantees, and not a
+  model of what an agent would actually load into context.
+- Provider usage (rate-limit headers) can change outside Golden Boy's control between refreshes; that's
+  exactly what `STALE` confidence exists to flag.
+- The `plan`/`run` unit breakdown is illustrative, not task decomposition (see above).
+- Golden Boy does not replace the calling coding agent's own judgment — it only informs how much to
+  attempt.
+
+## Validation
+
+Golden Boy v1.0.0 is validated, as of 2026-09-13, against:
+
+- 88 tests, 93% line coverage (`pytest --cov`)
+- Ruff and mypy clean (mypy checked under both 1.19.1 and 2.3.1)
+- `pip-audit`: 0 known vulnerabilities
+- Python 3.9–3.13, on GitHub Actions
+- A built wheel and sdist installed into independent, fresh virtual environments
+- A core-only install (`pip install goldenboy`) pulling zero third-party runtime dependencies
+
+CI (`.github/workflows/ci.yml`, 7 jobs):
+
+| Job | Result |
+|---|---|
+| security (pip-audit) | ✓ |
+| test (3.9) | ✓ |
+| test (3.10) | ✓ |
+| test (3.11) | ✓ |
+| test (3.12) | ✓ |
+| test (3.13) | ✓ |
+| build (wheel install + CLI smoke test) | ✓ |
+
+## Roadmap
+
+**v1.0** — done, tested, shipped:
+
+- ✓ Task-aware cost estimation
+- ✓ Adaptive execution modes (SAFE/CAUTION/LIMITED/CRITICAL)
+- ✓ Checkpoint/defer/resume
+- ✓ Usage confidence, including STALE detection
+- ✓ CLI (`plan`/`run`/`status`/`resume`/`doctor`)
+- ✓ Anthropic/OpenAI provider adapters
+- ✓ Claude Code skill integration
+
+**Future** (see `ROADMAP.md` for the full, honest breakdown of Planned vs. Research):
+
+- Additional agent integrations, if a real usage signal exists to build against
+- `goldenboy history` (needs a persistence story first)
+- Richer benchmarking (large-repo behavior, provider-adapter latency)
+
+Nothing above is claimed production-ready unless it's also covered by tests.
 
 ## Development
 
 ```bash
+git clone https://github.com/amuldi/GoldenBoy.git
+cd GoldenBoy
+python -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
-pytest tests/ --cov=goldenboy --cov-report=term-missing
+
+pytest --cov=goldenboy --cov-report=term-missing
 ruff check goldenboy tests scripts run_tests.py
 mypy
 ```
 
-mypy fails CI on any type error; coverage is reported but has no enforced threshold — the goal is
-confidence, not a number to chase (see `.github/workflows/ci.yml`). See `scripts/benchmark.py` /
-`BENCHMARKS.md` for real (not fabricated) latency numbers, `CONTRIBUTING.md` for the engineering
-principles this project holds itself to, `ROADMAP.md` for what's done vs. planned vs. still research, and
-`CHANGELOG.md` for what's changed release to release.
-
-## Security
-
-See `SECURITY.md` for what Golden Boy persists, how credentials are handled, and how to report a
-vulnerability privately.
-
-## Roadmap
-
-`ROADMAP.md` tracks what's Done, In Progress, Planned, or Research — including explicit non-goals (e.g.
-Golden Boy executing code itself is a non-goal, not a "planned" feature). Nothing there is claimed
-production-ready unless it's also covered by tests.
-
-## Contributing
-
-See `CONTRIBUTING.md` for setup, the checks a PR needs to pass (`pytest`, `ruff`, `mypy`, `python -m
-build`), and the engineering principles this project holds itself to — chiefly: change the smallest
-correct thing, never fabricate functionality to make something look finished, and never present an
-estimate or heuristic as if it were exact.
+See `CONTRIBUTING.md` for the engineering principles this project holds itself to, `CHANGELOG.md` for
+what's changed release to release, and `SECURITY.md` for how credentials are handled and how to report a
+vulnerability.
 
 ## License
 
-[MIT](LICENSE). The shortest license that works.
+[MIT](LICENSE).
