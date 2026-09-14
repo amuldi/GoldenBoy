@@ -62,8 +62,28 @@ jobs:
           /tmp/verify-install/bin/pip install dist/*.whl
           /tmp/verify-install/bin/goldenboy --help
           /tmp/verify-install/bin/goldenboy status --budget 50
+          /tmp/verify-install/bin/goldenboy status --budget 50 --json
           /tmp/verify-install/bin/goldenboy plan "Fix a typo in README" --budget 50
+          /tmp/verify-install/bin/goldenboy analyze "Fix a typo in README" --budget 50
+          /tmp/verify-install/bin/goldenboy analyze "Fix a typo in README" --budget 50 --json
           /tmp/verify-install/bin/goldenboy doctor
+          /tmp/verify-install/bin/goldenboy doctor --json
+          /tmp/verify-install/bin/goldenboy validate
+          /tmp/verify-install/bin/goldenboy replay
+          /tmp/verify-install/bin/goldenboy export --output /tmp/verify-install-export.json
+
+      - name: Benchmark sanity check (runs cleanly, latency is non-negative -- not a performance gate)
+        run: |
+          /tmp/verify-install/bin/goldenboy benchmark --json | python3 -c "
+          import json, sys
+          report = json.load(sys.stdin)
+          assert report['estimator_determinism_pass'] is True, 'Estimator must be deterministic'
+          for key in ('estimator_latency', 'risk_engine_latency'):
+              sample = report[key]
+              assert sample is not None, f'{key} did not run'
+              assert sample['mean_ms'] >= 0.0, f'{key} produced a negative latency'
+          print('benchmark sanity check passed:', json.dumps({k: report[k] for k in ('estimator_determinism_pass',)}))
+          "
 
   security:
     runs-on: ubuntu-latest
