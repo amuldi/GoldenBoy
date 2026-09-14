@@ -21,12 +21,25 @@ from goldenboy.adapters.mock import MockProvider
 from goldenboy.core.budget import Budget, UsageConfidence
 from goldenboy.core.checkpoint import CheckpointManager
 from goldenboy.core.config import GoldenBoyConfig
+from goldenboy.core.decision_engine import DecisionEngine
 from goldenboy.core.errors import CheckpointError, ConfigError, GoldenBoyError
 from goldenboy.core.estimator import Estimator, TaskEstimate
 from goldenboy.core.executor import AdaptiveExecutor
+from goldenboy.core.history import HistoryStore, TaskEvent
+from goldenboy.core.policies import (
+    ComplexityOnlyPolicy,
+    FixedThresholdPolicy,
+    GoldenBoyPolicy,
+    Policy,
+    PolicyDecision,
+    UsageOnlyPolicy,
+)
 from goldenboy.core.priorities import ExecutionUnit, Priority
 from goldenboy.core.risk import ExecutionMode, RiskEngine
+from goldenboy.core.task_classifier import TaskClassifier
+from goldenboy.core.task_types import DecisionAction, TaskType
 from goldenboy.integration import budget_aware_execution
+from goldenboy.protocol import GoldenBoyDecision, ProtocolError
 
 try:
     __version__ = _version("goldenboy")
@@ -57,6 +70,24 @@ __all__ = [
     "MockProvider",
     # Persistence
     "CheckpointManager",
+    # Task intelligence
+    "TaskType",
+    "TaskClassifier",
+    "DecisionAction",
+    "DecisionEngine",
+    # Protocol (the stable, versioned decision contract)
+    "GoldenBoyDecision",
+    "ProtocolError",
+    # History / local learning data
+    "HistoryStore",
+    "TaskEvent",
+    # Baseline + Golden Boy policies (used by goldenboy.replay)
+    "Policy",
+    "PolicyDecision",
+    "FixedThresholdPolicy",
+    "ComplexityOnlyPolicy",
+    "UsageOnlyPolicy",
+    "GoldenBoyPolicy",
     # Errors
     "GoldenBoyError",
     "ConfigError",
