@@ -1,0 +1,36 @@
+{
+  "name": "@goldenboy/sdk",
+  "version": "1.0.0",
+  "description": "Lightweight TypeScript client for the Golden Boy Protocol — spawns the real `goldenboy` CLI and returns typed, validated decisions. No reimplemented business logic.",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.6.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amuldi/GoldenBoy.git",
+    "directory": "sdk/typescript"
+  }
+}

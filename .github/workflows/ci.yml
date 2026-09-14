@@ -99,3 +99,35 @@ jobs:
           pip install --upgrade pip
           pip install -e ".[anthropic,openai,tiktoken]" pip-audit
           pip-audit
+
+  sdk-typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the real goldenboy CLI the SDK talks to (core only)
+        run: pip install -e .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install SDK devDependencies
+        working-directory: sdk/typescript
+        run: npm install
+
+      - name: Type check
+        working-directory: sdk/typescript
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: sdk/typescript
+        run: npm run build
+
+      - name: Test (real integration against the goldenboy CLI just installed -- no mocking)
+        working-directory: sdk/typescript
+        run: node --test dist/test

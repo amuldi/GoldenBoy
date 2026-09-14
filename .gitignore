@@ -11,3 +11,5 @@ build/
 .env
 .coverage
 .mypy_cache/
+node_modules/
+*.tsbuildinfo
