@@ -26,8 +26,33 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
 | `AnthropicAdapter` / `OpenAIAdapter` (rate-limit-header usage reporting) | Done |
 | Claude Code: `skills/goldenboy/SKILL.md` prompt-level integration | Done |
 | `goldenboy doctor` (Python version, optional deps + API-key-configured status, config, checkpoint diagnostics) | Done |
+| Golden Boy Protocol (`goldenboy/protocol.py`): versioned, language-neutral `GoldenBoyDecision` schema | Done — documented in `docs/PROTOCOL.md` |
+| TypeScript SDK (`sdk/typescript/`): thin client over the CLI's `--json` output, real integration-tested against the actual CLI | Done |
 | Codex integration | Research — no adapter exists yet; would need a real, documented usage signal from Codex before building one (see "No fake support" principle) |
-| `goldenboy history` (past checkpoints, mode transitions over time) | Research — needs real persisted history first; nothing to show yet, and it's a materially bigger feature (a history store) than the diagnostics `doctor` provides today |
+
+## Task intelligence
+
+| Item | Status |
+|---|---|
+| `TaskType` classification vocabulary (13 values) | Done |
+| `TaskClassifier`: deterministic, keyword-weighted classification with a heuristic (not calibrated-probability) confidence score | Done |
+| `DecisionEngine`: combines `RiskEngine` + `TaskClassifier` + `Estimator` into one explained `GoldenBoyDecision` (action/confidence/reason), plus a conservative policy for UNKNOWN-confidence budgets applied at this layer only | Done |
+| `goldenboy analyze` CLI command (text + `--json`) | Done |
+| Replacing the keyword classifier with a learned model | Research — explicitly gated on real, labeled outcome data existing first (see "Data & learning" below and `goldenboy/core/task_classifier.py`'s module docstring); no such data exists yet |
+
+## Data & learning
+
+| Item | Status |
+|---|---|
+| `HistoryStore`/`TaskEvent`: local, append-only event log (`.goldenboy/history.jsonl`), wired into `budget_aware_execution`, never stores raw task text | Done |
+| `goldenboy.analytics.data_quality`: real Dataset Quality report (rows, corrupted/duplicate/invalid-value ratios, status) over the local log | Done |
+| `goldenboy.analytics.engine`: cost/completion/failure/deferral-rate aggregates over the local log | Done |
+| `goldenboy validate` / `goldenboy export` CLI commands | Done |
+| Baseline policies (`goldenboy.core.policies`: fixed-threshold ×2, complexity-only, usage-only, `GoldenBoyPolicy`) | Done |
+| `goldenboy.replay.engine`: backtest (precision/recall/accuracy/premature-stop/unnecessary-continuation) + `walk_forward_folds` leakage-safe chronological splitting + `goldenboy replay` CLI command | Done — infrastructure only; reports `N/A` below 10 events, and there is no real historical dataset behind it yet (a fresh install starts at 0 events) |
+| A real, populated backtest result (not `N/A`) | Blocked on real usage data accumulating via `HistoryStore` — cannot be produced honestly today; see `docs/DATASETS.md` for why no external dataset substitutes for this |
+| A learned (non-fixed-threshold) policy in `goldenboy.core.policies` | Research — same gate as the task classifier above: needs real labeled outcome data first, per "start with a deterministic baseline, only then consider ML" |
+| Dataset/research landscape review (SWE-bench, HumanEval, LiveCodeBench, RepoBench, published token-consumption research) | Done — `docs/DATASETS.md`; none integrated (see "why none of these" in that doc) |
 
 ## Reliability & DX
 
@@ -36,10 +61,12 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
 | CI: lint (ruff) + type check (mypy) + unit tests + coverage report + package build + dependency audit (pip-audit) | Done |
 | Coverage enforced as a hard threshold | Explicit non-goal for now — reported, not gated; see below |
 | Public API (`goldenboy/__init__.py`) | Done |
-| Benchmark harness (`scripts/benchmark.py`) with real, dated results (`BENCHMARKS.md`) | Done for what's locally measurable (estimator/risk/CLI-startup latency) |
+| Benchmark harness (`goldenboy/core/benchmark.py`, shared by `scripts/benchmark.py` and `goldenboy benchmark`) with real, dated results (`BENCHMARKS.md`) | Done for what's locally measurable (estimator/risk/CLI-startup latency) |
+| CI benchmark-sanity check (estimator determinism + non-negative latency, not a performance gate) | Done |
 | Benchmarking real provider-adapter latency (`refresh_usage()`) | Research — would mostly measure network/API conditions, not Golden Boy itself; revisit if that distinction turns out to matter in practice |
 | Benchmarking behavior against a deliberately large synthetic repository | Planned — the `_MAX_SCAN_FILES`/`_MAX_FILE_BYTES` caps in `estimator.py` exist for this, but the caps themselves are untested at scale |
-| Split `cli.py`/`integration.py` into `cli/`/`integration/` packages | Explicit non-goal for now — both are single, cohesive files (~260 and ~60 lines) with no natural internal seam; splitting them would be churn without a concrete benefit. Revisit only if either genuinely outgrows one file. |
+| Split `cli.py` into a `cli/` package | Reassessed, not a non-goal anymore — `cli.py` was ~260 lines when that reasoning was written; it's ~570 lines and 10 subcommands now. Reclassified **Planned**: worth doing once one more command is added, but deferred this cycle since a pure reorganization carries real regression risk against `cli.py`'s extensive CLI test coverage for no behavior change. |
+| Language strategy review (why Python, why TypeScript where it is, why not Rust yet) | Done — `docs/LANGUAGE_STRATEGY.md` |
 
 ## Explicit non-goals (for now)
 
@@ -60,9 +87,18 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
 - Fabricated benchmark numbers or "supports X" claims ahead of a working,
   tested integration.
 - A hard coverage-percentage gate in CI — coverage is reported (currently
-  ~93% measured via `pytest --cov`, see the engineering report in project
+  ~95% measured via `pytest --cov`, see the engineering report in project
   history for the exact run) so regressions are visible, but chasing a
   number is not a goal in itself.
-- Restructuring the repository into `goldenboy/{cli,integration}/` package
-  directories to match a generic template, absent an actual reason (see
-  Reliability & DX above).
+- A database, a web dashboard, or an HTTP server anywhere in this project.
+  `HistoryStore` is a local JSONL file; the Golden Boy Protocol is
+  transported over CLI stdout and a spawned child process
+  (`sdk/typescript`), not a socket. None of these has a demonstrated need
+  today — see `docs/PROTOCOL.md`'s "Why no server."
+- A learned (ML) model anywhere in `goldenboy.core.task_classifier` or
+  `goldenboy.core.policies` ahead of real, labeled historical data.
+  `TaskClassifier` is deterministic/keyword-based and `GoldenBoyPolicy`
+  wraps the existing, tested `RiskEngine` — both explicitly documented as
+  the correct first step, not a placeholder for "real AI" pending unlocking.
+- Rewriting any part of the core in Rust ahead of a measured bottleneck —
+  see `docs/LANGUAGE_STRATEGY.md`.

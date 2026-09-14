@@ -3,6 +3,86 @@
 All notable changes to this project are documented in this file, using the
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
+## [1.1.0] - 2026-09-14
+
+Production-intelligence upgrade: a stable cross-language protocol, task
+understanding, local history/analytics, a genuine backtest framework, a
+much richer CLI, and a TypeScript SDK — all additive; every existing
+public API, CLI command's default behavior, and test from 1.0.0 keeps
+working unchanged.
+
+### Added
+
+- **Golden Boy Protocol** (`goldenboy/protocol.py`): a versioned,
+  language-neutral `GoldenBoyDecision` schema (`TaskProfile`/
+  `UsageSnapshot`/`RiskAssessment` → action/confidence/reason), strict
+  `from_dict` validation (`ProtocolError`), JSON round-trippable.
+  Documented in `docs/PROTOCOL.md`.
+- **Task intelligence**: `TaskType` (13-value classification vocabulary),
+  `TaskClassifier` (deterministic, keyword-weighted, heuristic-confidence
+  — explicitly not ML, see its module docstring for why), and
+  `DecisionEngine` (combines `RiskEngine` + `TaskClassifier` + `Estimator`
+  into one explained decision, with a conservative policy for
+  UNKNOWN-confidence budgets applied at this new layer only —
+  `RiskEngine`'s own tested UNKNOWN handling is unchanged).
+- **Local history & analytics**: `HistoryStore`/`TaskEvent`
+  (`.goldenboy/history.jsonl`, gitignored like the checkpoint file, wired
+  into `budget_aware_execution`, never stores raw task text — only length
+  + a truncated hash), `goldenboy.analytics.data_quality` (a real Dataset
+  Quality report), and `goldenboy.analytics.engine` (cost/completion/
+  failure/deferral-rate aggregates). Both report `NO_DATA`/`None` honestly
+  on a fresh install rather than a fabricated baseline.
+- **Baseline policies & replay/backtesting**: `goldenboy.core.policies`
+  (two fixed-threshold baselines, complexity-only, usage-only, and
+  `GoldenBoyPolicy` wrapping the real `RiskEngine`) and
+  `goldenboy.replay.engine` (`run_backtest` — precision/recall/accuracy/
+  premature-stop-rate/unnecessary-continuation-rate; `walk_forward_folds`
+  — chronological, leakage-safe splitting). Reports `N/A` below 10 events;
+  there is no real historical dataset shipped or fabricated — see
+  `docs/DATASETS.md` for the dataset landscape review this design is
+  based on.
+- **CLI**: `goldenboy analyze` (the full `DecisionEngine` recommendation),
+  `goldenboy validate` (config + checkpoint + data-quality, exits 1 on a
+  real problem), `goldenboy replay` (`--dataset` for an exported/shared
+  history file), `goldenboy benchmark`, `goldenboy export`
+  (config+checkpoint+history as one reproducible JSON document); `--json`
+  added to `status`/`doctor` too. `goldenboy/core/benchmark.py` extracted
+  so `scripts/benchmark.py` and `goldenboy benchmark` share one
+  implementation instead of two copies.
+- **TypeScript SDK** (`sdk/typescript/`): `GoldenBoyClient` spawns the
+  real `goldenboy` CLI and parses its `--json` output through a
+  TypeScript mirror of the same protocol validation — no reimplemented
+  decision logic. Zero runtime dependencies; tests run on Node's built-in
+  test runner and include real (non-mocked) integration coverage against
+  the actual installed CLI.
+- `docs/PROTOCOL.md`, `docs/DATASETS.md`, `docs/LANGUAGE_STRATEGY.md`.
+- CI: a `sdk-typescript` job (installs the real Python package, then
+  builds/tests the SDK against it); the build job's wheel-install smoke
+  test now exercises every new command, plus a benchmark-sanity step
+  (estimator determinism + non-negative latency — a correctness check,
+  not a performance gate).
+
+### Fixed
+
+- `goldenboy validate`'s checkpoint line used to double its own "OK —"
+  prefix (`Checkpoint: OK — OK — task ...`) because `CheckpointManager`'s
+  already-prefixed success string was wrapped in a second one — caught by
+  live smoke-testing, not a pre-existing test; now covered by a
+  regression test.
+- `SECURITY.md`'s "Supported versions" section still said "pre-1.0
+  (0.1.x)" after the 1.0.0 release; corrected, and extended to describe
+  `history.jsonl` (what it stores, that it never contains raw prompt text).
+
+### Validation
+
+- 186 Python tests passing (up from 88), 95% line coverage (`pytest
+  --cov`); 14 TypeScript tests passing (`npm test`, real CLI integration
+  included). Ruff and mypy clean.
+- Verified live against a clean-room wheel install with zero optional
+  extras: every new CLI command, `--help`, and the core-only
+  (`pip list` showing only `goldenboy`) install story all confirmed
+  working end-to-end, not merely unit-tested in isolation.
+
 ## [1.0.0] - 2026-09-13
 
 First stable release.

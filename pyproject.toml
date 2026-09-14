@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "goldenboy"
-version = "1.0.0"
-description = "A budget-aware execution layer for AI coding agents."
+version = "1.1.0"
+description = "A budget-aware resource-allocation and decision-intelligence layer for AI coding agents."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
