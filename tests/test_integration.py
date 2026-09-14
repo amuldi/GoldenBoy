@@ -3,7 +3,11 @@ from goldenboy.core.priorities import Priority
 from goldenboy.integration import budget_aware_execution
 
 
-def test_decorator_calls_the_real_function_when_budget_allows():
+def test_decorator_calls_the_real_function_when_budget_allows(tmp_path, monkeypatch):
+    # A successful call now also appends a history event via the default
+    # (cwd-relative) HistoryStore -- isolate cwd like every other test in
+    # this file so that write can't land in the real project directory.
+    monkeypatch.chdir(tmp_path)
     provider = MockProvider(initial_percentage=100.0)
     calls = []
 
