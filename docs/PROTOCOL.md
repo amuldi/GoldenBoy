@@ -11,6 +11,16 @@ TypeScript) — they're kept in sync by hand, the same convention
 `skills/goldenboy/SKILL.md` already uses to stay in sync with
 `goldenboy.core.risk.ExecutionMode`.
 
+`schemas/decision.schema.json` formalizes this shape as an actual JSON
+Schema (draft-07), so "kept in sync by hand" has an automated check behind
+it: `tests/test_protocol_schema.py` validates real `DecisionEngine` output
+against it and cross-checks the schema's `required`/`enum` values against
+what `goldenboy.protocol` enforces; `sdk/typescript/test/schema.test.ts`
+does the equivalent on the TypeScript side, exercising `parseDecision`
+against every field the schema marks required. The schema doesn't replace
+either implementation (neither reads it at runtime) — it's a shared,
+versioned reference the two are tested against, per language.
+
 ## Design goals
 
 - **Versioned.** Every payload carries `schema_version` (currently

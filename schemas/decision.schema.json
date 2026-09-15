@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/amuldi/GoldenBoy/schemas/decision.schema.json",
+  "title": "GoldenBoyDecision",
+  "description": "The Golden Boy Protocol's single output shape (goldenboy analyze --json). Authoritative implementations: goldenboy/protocol.py (Python) and sdk/typescript/src/types.ts + src/validate.ts (TypeScript) -- see docs/PROTOCOL.md. This file formalizes the shape both already implement by hand; it does not replace either implementation, and both are checked against it (tests/test_protocol_schema.py, sdk/typescript/test/schema.test.ts).",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "task", "usage", "risk", "action", "confidence", "reason"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "PROTOCOL_VERSION at write time, e.g. \"1.0.0\". A reader rejects a payload whose major segment it doesn't understand."
+    },
+    "generated_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp."
+    },
+    "task": {
+      "$ref": "#/$defs/taskProfile"
+    },
+    "usage": {
+      "$ref": "#/$defs/usageSnapshot"
+    },
+    "risk": {
+      "$ref": "#/$defs/riskAssessment"
+    },
+    "action": {
+      "type": "string",
+      "enum": ["run", "continue", "reduce_scope", "finish", "verify", "stop", "ask_user"],
+      "description": "goldenboy.core.task_types.DecisionAction, lowercase on the wire."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "reason": {
+      "type": "string"
+    },
+    "recommendation": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "taskProfile": {
+      "type": "object",
+      "required": [
+        "task_type", "task_type_confidence", "complexity", "complexity_label",
+        "estimated_cost_percentage", "estimated_cost_confidence"
+      ],
+      "properties": {
+        "task_type": {
+          "type": "string",
+          "enum": [
+            "implementation", "bug_fix", "refactor", "testing", "debugging",
+            "documentation", "research", "dependency_change", "architecture_change",
+            "code_review", "performance_optimization", "release", "unknown"
+          ]
+        },
+        "task_type_confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "complexity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "complexity_label": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"] },
+        "estimated_cost_percentage": { "type": "number", "minimum": 0.0 },
+        "estimated_cost_confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "signals": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" },
+          "default": {}
+        }
+      },
+      "additionalProperties": true
+    },
+    "usageSnapshot": {
+      "type": "object",
+      "required": ["remaining_percentage", "usable_percentage", "source", "confidence"],
+      "properties": {
+        "remaining_percentage": { "type": "number" },
+        "usable_percentage": { "type": "number", "minimum": 0.0 },
+        "source": { "type": "string" },
+        "confidence": { "type": "string", "enum": ["EXACT", "ESTIMATED", "STALE", "UNKNOWN"] }
+      },
+      "additionalProperties": true
+    },
+    "riskAssessment": {
+      "type": "object",
+      "required": ["mode", "reason_code"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["SAFE", "CAUTION", "LIMITED", "CRITICAL"] },
+        "reason_code": { "type": "string" },
+        "ratio": { "type": ["number", "null"] }
+      },
+      "additionalProperties": true
+    }
+  }
+}

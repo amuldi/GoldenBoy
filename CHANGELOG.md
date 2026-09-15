@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file, using the
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
+## [Unreleased]
+
+Polyglot-architecture feasibility audit (`ARCHITECTURE_AUDIT.md` /
+`POLYGLOT_UPGRADE_REPORT.md`): evidence-based review of whether Golden Boy
+should expand into Rust/a second TypeScript CLI. No core behavior changed;
+no runtime dependency added.
+
+### Added
+
+- `schemas/decision.schema.json` — formal JSON Schema for the Golden Boy
+  Protocol, plus cross-language compatibility tests
+  (`tests/test_protocol_schema.py`, `sdk/typescript/test/schema.test.ts`).
+- `scripts/benchmark_scaling.py` — the previously-Planned "large synthetic
+  repository" benchmark from `ROADMAP.md`, plus prompt-size and
+  history-log-size scaling. Results in `benchmarks/results/`.
+- `scripts/validate_policy.py` — realistic task/budget-curve validation of
+  `DecisionEngine` and every baseline in `goldenboy.core.policies` against
+  identical inputs, plus real (not fabricated) `goldenboy validate`/
+  `goldenboy replay` output. Results in `benchmarks/results/`.
+
 ## [1.1.0] - 2026-09-14
 
 Production-intelligence upgrade: a stable cross-language protocol, task

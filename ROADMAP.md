@@ -64,9 +64,13 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
 | Benchmark harness (`goldenboy/core/benchmark.py`, shared by `scripts/benchmark.py` and `goldenboy benchmark`) with real, dated results (`BENCHMARKS.md`) | Done for what's locally measurable (estimator/risk/CLI-startup latency) |
 | CI benchmark-sanity check (estimator determinism + non-negative latency, not a performance gate) | Done |
 | Benchmarking real provider-adapter latency (`refresh_usage()`) | Research — would mostly measure network/API conditions, not Golden Boy itself; revisit if that distinction turns out to matter in practice |
-| Benchmarking behavior against a deliberately large synthetic repository | Planned — the `_MAX_SCAN_FILES`/`_MAX_FILE_BYTES` caps in `estimator.py` exist for this, but the caps themselves are untested at scale |
+| Benchmarking behavior against a deliberately large synthetic repository | Done (2026-09-15) — `scripts/benchmark_scaling.py` / `benchmarks/results/2026-09-15-scaling.md`. Confirms `_MAX_SCAN_FILES=200` actually bounds latency at scale (48ms at 200 files vs. 51.6ms at 5,000). |
 | Split `cli.py` into a `cli/` package | Reassessed, not a non-goal anymore — `cli.py` was ~260 lines when that reasoning was written; it's ~570 lines and 10 subcommands now. Reclassified **Planned**: worth doing once one more command is added, but deferred this cycle since a pure reorganization carries real regression risk against `cli.py`'s extensive CLI test coverage for no behavior change. |
-| Language strategy review (why Python, why TypeScript where it is, why not Rust yet) | Done — `docs/LANGUAGE_STRATEGY.md` |
+| Language strategy review (why Python, why TypeScript where it is, why not Rust yet) | Done — `docs/LANGUAGE_STRATEGY.md`, re-confirmed with fresh benchmarks 2026-09-15 — see `ARCHITECTURE_AUDIT.md` |
+| Golden Boy Protocol formalized as JSON Schema (`schemas/decision.schema.json`) + cross-language compatibility tests | Done (2026-09-15) — `tests/test_protocol_schema.py` (Python), `sdk/typescript/test/schema.test.ts` (TypeScript); fails if either implementation's required fields or enums drift from the schema |
+| `HistoryStore.load_events()` has no size cap (unlike `Estimator`'s file-walk) | Planned — not a problem at today's realistic single-user scale (measured: 1.46s at a 100MB/214K-event log, see `benchmarks/results/2026-09-15-scaling.md`), but worth capping or streaming before it is one. See `ARCHITECTURE_AUDIT.md` §8. |
+| `Estimator.estimate_task()`'s cost estimate is dominated by repo-context size, not prompt complexity, once the repo is moderately sized | Research — real finding, not fixed here (would change every existing estimate); see `ARCHITECTURE_AUDIT.md` §7 and `benchmarks/results/2026-09-15-policy-validation.md` |
+| CI matrix is Ubuntu-only | Planned — the CLI/SDK subprocess-spawning contract is used cross-platform in practice; macOS/Windows aren't currently verified in CI. See `ARCHITECTURE_AUDIT.md` §8. |
 
 ## Explicit non-goals (for now)
 
@@ -101,4 +105,11 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
   wraps the existing, tested `RiskEngine` — both explicitly documented as
   the correct first step, not a placeholder for "real AI" pending unlocking.
 - Rewriting any part of the core in Rust ahead of a measured bottleneck —
-  see `docs/LANGUAGE_STRATEGY.md`.
+  see `docs/LANGUAGE_STRATEGY.md`, re-confirmed by a fresh polyglot-
+  feasibility audit on 2026-09-15 (`ARCHITECTURE_AUDIT.md`) including new
+  large-scale benchmarks that didn't exist when `LANGUAGE_STRATEGY.md` was
+  first written.
+- A second, independent CLI implementation (TypeScript or otherwise) that
+  reimplements `Estimator`/`TaskClassifier`/`RiskEngine`/`DecisionEngine`
+  rather than talking to the real Python CLI — evaluated and rejected in
+  `ARCHITECTURE_AUDIT.md` §4/§9; `sdk/typescript` stays a thin client.

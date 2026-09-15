@@ -14,11 +14,16 @@ cold-start time — all local, no network calls.
 Not yet measured (Research in `ROADMAP.md`): anything involving a real
 provider API call (`refresh_usage()` latency depends entirely on network/API
 conditions outside Golden Boy's control, so a number here would mostly
-measure the network, not Golden Boy), memory usage under sustained use,
-and behavior at large repository scale (this repo is small; the
-`_MAX_SCAN_FILES`/`_MAX_FILE_BYTES` caps in `estimator.py` exist
-specifically to bound worst-case behavior, but the bound itself hasn't
-been benchmarked against a deliberately large synthetic repo).
+measure the network, not Golden Boy), and memory usage under sustained use.
+
+Behavior at scale (prompt size, repository file count, history log size) is
+now measured separately in `scripts/benchmark_scaling.py` — see
+`benchmarks/results/2026-09-15-scaling.md` and `ARCHITECTURE_AUDIT.md` §2
+for the results and what they mean. That script is intentionally kept
+separate from the one below: it takes tens of seconds to run (it builds
+synthetic repositories and multi-hundred-MB files on disk) rather than
+milliseconds, so it isn't part of the routine "run this before relying on
+these numbers" workflow this file documents.
 
 ## 2026-09-13 — Apple M1 Pro, macOS (arm64), Python 3.13.7
 
