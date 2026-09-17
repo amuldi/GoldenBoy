@@ -102,11 +102,28 @@ _COMPILED: List[Tuple[TaskType, "re.Pattern[str]", int]] = [
 ]
 
 
+# A secondary type must score at least this fraction of the top type's
+# score to be reported -- otherwise a single incidental low-weight keyword
+# match (e.g. one stray "test" in an otherwise clearly ARCHITECTURE_CHANGE
+# prompt) would get reported as a full secondary category. Fixed,
+# documented threshold, not tuned to any dataset.
+_SECONDARY_TYPE_MIN_SCORE_RATIO = 0.5
+# Bounds how many secondary types are ever reported, so "a bit of everything"
+# phrasing doesn't produce a long, low-signal list.
+_MAX_SECONDARY_TYPES = 3
+
+
 @dataclass
 class TaskClassification:
     task_type: TaskType
     confidence: float  # heuristic match-strength in [0, 1] -- not a calibrated probability
     signals: Dict[str, int] = field(default_factory=dict)  # matched-phrase -> weight, for transparency
+    # Other task types that also scored meaningfully (see
+    # _SECONDARY_TYPE_MIN_SCORE_RATIO), ordered highest-scoring first.
+    # Backward compatible: existing single-label consumers that only read
+    # `task_type`/`confidence` are unaffected by this always-present but
+    # possibly-empty list. See ROADMAP.md / section 6 of the project brief.
+    secondary_task_types: List[TaskType] = field(default_factory=list)
 
 
 class TaskClassifier:
@@ -147,4 +164,15 @@ class TaskClassifier:
         coverage = min(1.0, top_score / 6.0)  # softly reward a few strong matches over one weak one
         confidence = round(min(1.0, 0.5 * margin + 0.5 * coverage + 0.15), 3)
 
-        return TaskClassification(task_type=top_type, confidence=confidence, signals=signals)
+        secondary_task_types = [
+            task_type
+            for task_type, score in ranked[1:]
+            if score > 0 and score >= top_score * _SECONDARY_TYPE_MIN_SCORE_RATIO
+        ][:_MAX_SECONDARY_TYPES]
+
+        return TaskClassification(
+            task_type=top_type,
+            confidence=confidence,
+            signals=signals,
+            secondary_task_types=secondary_task_types,
+        )

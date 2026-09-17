@@ -36,6 +36,8 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
 |---|---|
 | `TaskType` classification vocabulary (13 values) | Done |
 | `TaskClassifier`: deterministic, keyword-weighted classification with a heuristic (not calibrated-probability) confidence score | Done |
+| Multi-label classification (`TaskClassification.secondary_task_types`, alongside the existing single-label `task_type`) | Done (2026-09-17) |
+| Independent task-complexity model (`goldenboy.core.complexity`), separate from the cost estimate and from the type classifier | Done (2026-09-17) — replaces the earlier "complexity back-computed from cost %" approach; see CHANGELOG.md |
 | `DecisionEngine`: combines `RiskEngine` + `TaskClassifier` + `Estimator` into one explained `GoldenBoyDecision` (action/confidence/reason), plus a conservative policy for UNKNOWN-confidence budgets applied at this layer only | Done |
 | `goldenboy analyze` CLI command (text + `--json`) | Done |
 | Replacing the keyword classifier with a learned model | Research — explicitly gated on real, labeled outcome data existing first (see "Data & learning" below and `goldenboy/core/task_classifier.py`'s module docstring); no such data exists yet |
@@ -51,6 +53,9 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
 | Baseline policies (`goldenboy.core.policies`: fixed-threshold ×2, complexity-only, usage-only, `GoldenBoyPolicy`) | Done |
 | `goldenboy.replay.engine`: backtest (precision/recall/accuracy/premature-stop/unnecessary-continuation) + `walk_forward_folds` leakage-safe chronological splitting + `goldenboy replay` CLI command | Done — infrastructure only; reports `N/A` below 10 events, and there is no real historical dataset behind it yet (a fresh install starts at 0 events) |
 | A real, populated backtest result (not `N/A`) | Blocked on real usage data accumulating via `HistoryStore` — cannot be produced honestly today; see `docs/DATASETS.md` for why no external dataset substitutes for this |
+| Execution telemetry contract (`goldenboy.core.telemetry.ExecutionTelemetry`/`TelemetryStore`, `goldenboy report` CLI command): what an external agent actually observed after acting on a decision | Done (2026-09-17) — infrastructure only; a fresh install has zero recorded telemetry, same honesty convention as `HistoryStore` |
+| Estimation calibration (`goldenboy.core.calibration`, `goldenboy calibrate` CLI command): MAE/RMSE/median-abs-error/bias/over-under-estimation-rate, overall and per task type | Done (2026-09-17) — reports `N/A` below 10 telemetry samples; **INSUFFICIENT DATA today** on any fresh install, same as backtesting above, until real telemetry accumulates |
+| A real, populated calibration result (not `N/A`) | Blocked on real telemetry accumulating via `goldenboy report` — same shape of gap as the backtest row above, now with the plumbing in place to eventually fill it |
 | A learned (non-fixed-threshold) policy in `goldenboy.core.policies` | Research — same gate as the task classifier above: needs real labeled outcome data first, per "start with a deterministic baseline, only then consider ML" |
 | Dataset/research landscape review (SWE-bench, HumanEval, LiveCodeBench, RepoBench, published token-consumption research) | Done — `docs/DATASETS.md`; none integrated (see "why none of these" in that doc) |
 
@@ -69,8 +74,8 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
 | Language strategy review (why Python, why TypeScript where it is, why not Rust yet) | Done — `docs/LANGUAGE_STRATEGY.md`, re-confirmed with fresh benchmarks 2026-09-15 — see `ARCHITECTURE_AUDIT.md` |
 | Golden Boy Protocol formalized as JSON Schema (`schemas/decision.schema.json`) + cross-language compatibility tests | Done (2026-09-15) — `tests/test_protocol_schema.py` (Python), `sdk/typescript/test/schema.test.ts` (TypeScript); fails if either implementation's required fields or enums drift from the schema |
 | `HistoryStore.load_events()` has no size cap (unlike `Estimator`'s file-walk) | Planned — not a problem at today's realistic single-user scale (measured: 1.46s at a 100MB/214K-event log, see `benchmarks/results/2026-09-15-scaling.md`), but worth capping or streaming before it is one. See `ARCHITECTURE_AUDIT.md` §8. |
-| `Estimator.estimate_task()`'s cost estimate is dominated by repo-context size, not prompt complexity, once the repo is moderately sized | Research — real finding, not fixed here (would change every existing estimate); see `ARCHITECTURE_AUDIT.md` §7 and `benchmarks/results/2026-09-15-policy-validation.md` |
-| CI matrix is Ubuntu-only | Planned — the CLI/SDK subprocess-spawning contract is used cross-platform in practice; macOS/Windows aren't currently verified in CI. See `ARCHITECTURE_AUDIT.md` §8. |
+| `Estimator.estimate_task()`'s cost estimate is dominated by repo-context size, not prompt complexity, once the repo is moderately sized | **Done (2026-09-17)** — `Estimator._estimate_relevant_context` + `goldenboy.core.complexity` (see CHANGELOG.md). Re-running `scripts/validate_policy.py`'s exact 8-scenario budget curve went from a uniform ~66.4–66.5% every scenario (`benchmarks/results/2026-09-17-policy-validation-BEFORE-p0-fix.md`) to 5.0%–28.5%, correctly differentiated (`benchmarks/results/2026-09-17-policy-validation.md`). |
+| CI matrix is Ubuntu-only | Planned — the CLI/SDK subprocess-spawning contract is used cross-platform in practice; macOS/Windows aren't currently verified in CI. See `ARCHITECTURE_AUDIT.md` §8. Not changed in the 2026-09-17 upgrade — deferred, see that session's final report. |
 
 ## Explicit non-goals (for now)
 

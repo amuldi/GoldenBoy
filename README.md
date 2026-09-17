@@ -28,10 +28,19 @@
   <a href="#-protocol">Protocol</a> &nbsp;&middot;&nbsp;
   <a href="#-typescript-sdk">TypeScript SDK</a> &nbsp;&middot;&nbsp;
   <a href="#-replay-and-backtesting">Backtesting</a> &nbsp;&middot;&nbsp;
+  <a href="#-telemetry-and-calibration">Calibration</a> &nbsp;&middot;&nbsp;
   <a href="#-validation">Validation</a> &nbsp;&middot;&nbsp;
   <a href="#-roadmap">Roadmap</a> &nbsp;&middot;&nbsp;
   <a href="#-contributing">Contributing</a>
 </p>
+
+> **Latest update (2026-09-17, protocol `1.1.0`):** fixed the P0 finding from the 2026-09-15 architecture
+> audit — cost estimates were dominated by whole-repository size, not task size (the same ~66% for a typo
+> fix and a full re-architecture). `Estimator` now scores which repo files a task's own wording actually
+> points at (context relevance) and an independent, explainable complexity model, instead of scanning the
+> whole repo — measured before/after in `benchmarks/results/2026-09-17-policy-validation*.md`. Also new:
+> multi-label task classification, an execution-telemetry contract (`goldenboy report`), and estimate-vs-
+> actual calibration (`goldenboy calibrate`). Full evidence in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -67,22 +76,25 @@ Every value below is real, live output from `goldenboy analyze` — not a mockup
 $ goldenboy analyze "Refactor the authentication system and update tests" --budget 6
 --- Golden Boy Analysis: 'Refactor the authentication system and update tests' ---
 Task type:        refactor (confidence: 0.47)
-Complexity:       LOW (0.05)
-Estimated cost:   5.00% (confidence: 0.85)
+Also detected:    testing, architecture_change
+Complexity:       LOW (0.20)
+Complexity signals: test_requirement_keyword, refactor_keyword
+Estimated cost:   29.42% (confidence: 0.85)
 Remaining usage:  6.00% (exact, source: mock)
 Risk:             LIMITED (ESTIMATED_COST_EXCEEDS_USABLE_BUDGET)
 Decision:         REDUCE_SCOPE (confidence: 0.77)
-Reason:           Task classified as refactor (LOW complexity, estimated cost 5.0% of budget, confidence 0.85). Remaining budget is 6.0% (exact via mock). Risk mode: LIMITED. Recommended action: REDUCE_SCOPE.
+Reason:           Task classified as refactor (LOW complexity, estimated cost 29.4% of budget, confidence 0.85). Remaining budget is 6.0% (exact via mock). Risk mode: LIMITED. Recommended action: REDUCE_SCOPE.
 Recommendation:
   - Constrain remaining work to P0/P1 items.
   - Explicitly defer P2-P4 items and say so.
 ```
 
 Nothing here is templated storytelling: the task type came from `TaskClassifier` actually scanning the
-prompt text, the cost from `Estimator` actually scanning this run's repo + prompt, and the risk mode from
-`RiskEngine` actually comparing that cost to the mock budget you passed in. Change the budget or the task
-text and every field changes with it — see [Protocol](#-protocol) for the exact JSON this produces with
-`--json`.
+prompt text, the cost from `Estimator` actually scoring which files in *this* repo the task text points at
+(not the whole repository — see [Key Capabilities](#-key-capabilities) below) plus the task's own complexity signals, and
+the risk mode from `RiskEngine` actually comparing that cost to the mock budget you passed in. Change the
+budget or the task text and every field changes with it — see [Protocol](#-protocol) for the exact JSON
+this produces with `--json`.
 
 ---
 
@@ -93,9 +105,9 @@ text and every field changes with it — see [Protocol](#-protocol) for the exac
     <td width="50%" valign="top">
       <h3>🧠 Task Intelligence</h3>
       <div>
-        • 13-type classifier (bug fix, refactor, testing, architecture change, …)<br>
+        • 13-type classifier (bug fix, refactor, testing, architecture change, …), plus secondary types when more than one scores meaningfully<br>
         • Deterministic + transparent — a heuristic match-strength score, never a fake calibrated probability<br>
-        • Complexity label (LOW/MEDIUM/HIGH/VERY_HIGH) derived from the real cost estimate
+        • Complexity (LOW/MEDIUM/HIGH/VERY_HIGH) from an independent, explainable signal table — not back-computed from cost
       </div>
     </td>
     <td width="50%" valign="top">
@@ -161,6 +173,24 @@ text and every field changes with it — see [Protocol](#-protocol) for the exac
       </div>
     </td>
   </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🎯 Context-Relevant Estimation</h3>
+      <div>
+        • Cost is scored from the repo context the task's own wording actually points at — not whole-repository size<br>
+        • A task matching nothing in the repo reports zero relevant context (and lower confidence), never a repo-sized guess<br>
+        • Repository size is still reported separately, for transparency, but no longer feeds the cost total
+      </div>
+    </td>
+    <td width="50%" valign="top">
+      <h3>📈 Telemetry &amp; Calibration</h3>
+      <div>
+        • <code>goldenboy report</code>: record what an external agent actually observed (tokens, tests, verification status)<br>
+        • <code>goldenboy calibrate</code>: MAE/RMSE/bias, estimated vs. actual, overall and per task type<br>
+        • Honest <code>N/A</code> below 10 recorded samples — same convention as Replay &amp; Backtesting
+      </div>
+    </td>
+  </tr>
 </table>
 
 ---
@@ -168,13 +198,15 @@ text and every field changes with it — see [Protocol](#-protocol) for the exac
 ## 🔄 How It Works
 
 ```
-Task
+Task text
   │
-  ▼
-Task Classification  ──►  TaskType + complexity label
-  │                        (TaskClassifier)
-  ▼
-Repository scan + prompt  ──►  Cost Estimate
+  ├──► TaskClassifier        ──► TaskType (+ secondary types)
+  ├──► Complexity model      ──► complexity score + named signals
+  └──► Context relevance     ──► which repo files this task text
+       (Estimator)                actually points at (not repo size)
+                                     │
+                                     ▼
+                              Cost Estimate
                                      │
                                      ▼
                           Budget × Confidence
@@ -189,10 +221,13 @@ Repository scan + prompt  ──►  Cost Estimate
                         FINISH / VERIFY / STOP / ASK_USER)
                                      │
                                      ▼
-                    Record outcome locally (HistoryStore)
+                    Record decision locally (HistoryStore)
                                      │
                                      ▼
-                  Backtest policies against it (goldenboy replay)
+              External agent executes ──► goldenboy report (actual telemetry)
+                                     │
+                                     ▼
+        goldenboy calibrate (estimated vs. actual)  ·  goldenboy replay (backtest policies)
 ```
 
 | Mode | Meaning | Agent behavior |
@@ -245,8 +280,8 @@ line below is real output, captured from this repo (nothing staged or shortened)
 ```
 --- Execution Plan: 'Refactor the entire authentication system' ---
 Remaining Budget: 15.00%
-Estimated Cost (heuristic, based on prompt + repo size): 25.37% (confidence: 0.85)
-Risk Assessment: LIMITED
+Estimated Cost (heuristic, based on prompt + relevant repo context + expected output): 5.00% (confidence: 0.59)
+Risk Assessment: SAFE
 
 Example unit breakdown (illustrative, not derived from the task above):
   [P0] Core feature implementation (Cost: 10.0%)
@@ -255,6 +290,12 @@ Example unit breakdown (illustrative, not derived from the task above):
   [P3] Animations / visual polish (Cost: 4.0%)
   [P4] Full documentation pass (Cost: 6.0%)
 ```
+
+This repository has no `auth`/`authentication` module of its own, so `Estimator` correctly finds no
+relevant file-path evidence for this specific task text here — cost floors at 5% and confidence drops
+accordingly (see [Key Capabilities](#-key-capabilities)). The next command's `LIMITED` risk mode below comes from a
+*different*, unrelated estimate (`Estimator.estimate_plan()` costing the illustrative example units
+above, not this task's text — see the note in that command's own output).
 
 </details>
 
@@ -368,7 +409,7 @@ goldenboy doctor                                            # environment, confi
 | Command | Purpose |
 |---|---|
 | `goldenboy analyze <task>` | Full task-intelligence recommendation: type, complexity, risk, action, confidence, reason. `--progress 0.0-1.0`, `--json`. |
-| `goldenboy plan <task>` | Estimate a task's real cost from its text + repo size, and show the resulting risk mode. |
+| `goldenboy plan <task>` | Estimate a task's real cost from its text + the repo context actually relevant to it, and show the resulting risk mode. |
 | `goldenboy run <task>` | Execute a budget-aware demo plan adaptively against a mock budget. |
 | `goldenboy status` | Inspect current budget and any pending checkpoint. `--json`. |
 | `goldenboy resume` | Resume execution from the previous checkpoint. |
@@ -376,6 +417,8 @@ goldenboy doctor                                            # environment, confi
 | `goldenboy validate` | Validate config + checkpoint + local history data quality; exits 1 on a real problem. `--json`. |
 | `goldenboy replay` | Backtest baseline policies against local (or `--dataset PATH`) history. `--json`. |
 | `goldenboy benchmark` | Measure estimator/risk-engine/CLI-startup latency, on this machine, now. `--json`. |
+| `goldenboy report` | Record actual execution telemetry for a task Golden Boy previously analyzed. `--outcome` (required) plus optional fields, or `--json-file PATH`. |
+| `goldenboy calibrate` | Compare estimated vs. actual cost (MAE/RMSE/bias) over recorded telemetry. `--dataset PATH`, `--json`. |
 | `goldenboy export` | Export config + checkpoint + history as one reproducible JSON document. `--output PATH`. |
 
 Add `--budget` to any mock-budget command to control the starting budget, and `-v`/`--verbose` (before the
@@ -427,12 +470,15 @@ goldenboy analyze "Refactor the auth module" --budget 6 --json
 
 ```jsonc
 {
-  "schema_version": "1.0.0",
-  "task": { "task_type": "refactor", "complexity_label": "LOW", "estimated_cost_percentage": 5.0, "...": "..." },
+  "schema_version": "1.1.0",
+  "task": {
+    "task_type": "refactor", "complexity_label": "LOW", "estimated_cost_percentage": 5.0,
+    "secondary_task_types": [], "complexity_signals": ["refactor_keyword"], "...": "..."
+  },
   "usage": { "remaining_percentage": 6.0, "confidence": "EXACT", "...": "..." },
   "risk": { "mode": "LIMITED", "reason_code": "ESTIMATED_COST_EXCEEDS_USABLE_BUDGET" },
   "action": "reduce_scope",
-  "confidence": 0.774,
+  "confidence": 0.832,
   "reason": "Task classified as refactor (LOW complexity, ...). Recommended action: REDUCE_SCOPE.",
   "recommendation": ["Constrain remaining work to P0/P1 items.", "Explicitly defer P2-P4 items and say so."]
 }
@@ -537,6 +583,41 @@ ready infrastructure for a future learned policy (today's five policies are all 
 folding doesn't change their scores yet; see `goldenboy/replay/engine.py`'s module docstring). The report
 always prints its own methodology limitations alongside any numbers — see
 [`goldenboy/replay/engine.py`](goldenboy/replay/engine.py).
+
+---
+
+## 📈 Telemetry and Calibration
+
+Golden Boy estimates a cost *before* work happens; it has no way to observe what actually happened
+afterward unless something tells it. `goldenboy report` is that contract — record what an external agent
+(you, or whatever executed the task) actually measured, echoing back the estimate it was compared against:
+
+```bash
+$ goldenboy report --outcome completed --task-type bug_fix \
+    --estimated-cost-percentage 8.0 --actual-total-tokens 9000
+Recorded telemetry: outcome=completed, actual_cost=9.00%
+```
+
+Only `--outcome` is required — every other field (`--verification-status`, `--tests-run`/`--tests-passed`,
+`--files-touched`, `--duration-seconds`, …) is optional, and none of them ever include your prompt or code;
+see [`goldenboy/core/telemetry.py`](goldenboy/core/telemetry.py) for the full field contract and
+[`skills/goldenboy/SKILL.md`](skills/goldenboy/SKILL.md) for the verification-status vocabulary
+(`VERIFIED`/`PARTIALLY_VERIFIED`/`UNVERIFIED`/`FAILED`) that distinguishes a *claimed* outcome from a
+*verified* one.
+
+Once at least 10 telemetry records exist, `goldenboy calibrate` compares estimated against actual cost —
+same honest floor as `goldenboy replay`:
+
+```bash
+$ goldenboy calibrate
+Calibration (estimated vs. actual cost percentage): n=0 (need >= 10) -- N/A, insufficient data
+```
+
+That's real output on a fresh install (zero recorded telemetry is the honest starting state — see
+[Limitations](#-limitations)). With real data, it reports MAE, RMSE, median absolute error, bias
+(`mean(actual - estimated)`; positive means Golden Boy underestimates on average), and over-/under-
+estimation rates, both overall and broken out per task type — see
+[`goldenboy/core/calibration.py`](goldenboy/core/calibration.py).
 
 ---
 
@@ -676,10 +757,12 @@ Out-of-range values, malformed JSON, and unparseable `GOLDENBOY_*` env vars all 
 
 ## ⚠️ Limitations
 
-- Cost estimates are heuristic (prompt length + a bounded repo scan) — not billing guarantees, and not a model of what an agent would actually load into context.
-- `TaskClassifier` is a deterministic keyword matcher, not a trained model — its confidence score reflects match strength, not a calibrated probability. It has no labeled real-world data to train against yet (see `docs/DATASETS.md`).
-- `goldenboy replay`/`goldenboy.analytics` report `N/A`/`NO_DATA` until at least 10 real events are recorded locally — there is no bundled dataset standing in for that.
+- Cost estimates are heuristic — prompt length, a bounded scan of the repo files the task's own wording gives evidence for, and an expected-output size scaled by a fixed complexity-signal table — not billing guarantees, and not a model of what an agent would actually load into context.
+- Context relevance is deterministic path/keyword matching (see [Key Capabilities](#-key-capabilities)), not semantic understanding. A task whose wording doesn't textually match any file path in the repo reports zero relevant context (with lower confidence) even if the task is, in fact, relevant to that repo — it is a recall-oriented heuristic, not a guarantee of finding every actually-relevant file.
+- `TaskClassifier` is a deterministic keyword matcher, not a trained model — its confidence score reflects match strength, not a calibrated probability. Same for the independent complexity score (`goldenboy.core.complexity`): a `0.72` means "this task matched signals totaling 0.72 of a fixed weight table," not "72% probability of anything." Neither has labeled real-world data to train/calibrate against yet (see `docs/DATASETS.md`).
+- `goldenboy replay`/`goldenboy.analytics` report `N/A`/`NO_DATA`, and `goldenboy calibrate` reports insufficient-data, until at least 10 real events/telemetry records are recorded locally — there is no bundled dataset standing in for either.
 - Replay's metrics are off-policy evaluation from logged outcomes: an event's recorded outcome reflects the decision Golden Boy actually made, not the alternate policy being scored — a descriptive comparison, not a causal guarantee (see [Replay and Backtesting](#-replay-and-backtesting)).
+- Calibration depends entirely on external agents actually calling `goldenboy report` — Golden Boy cannot observe execution outcomes on its own, and a `verification_status` of `VERIFIED` is only as trustworthy as whoever reported it; Golden Boy has no way to independently confirm a claimed verification.
 - Provider usage (rate-limit headers) can change outside Golden Boy's control between refreshes; that's exactly what `STALE` confidence exists to flag.
 - The `plan`/`run` unit breakdown is illustrative, not task decomposition (see above).
 - Golden Boy does not replace the calling coding agent's own judgment — it only informs how much to attempt.
@@ -688,14 +771,14 @@ Out-of-range values, malformed JSON, and unparseable `GOLDENBOY_*` env vars all 
 
 ## ✅ Validation
 
-Golden Boy v1.1.0 is validated, as of 2026-09-14, against:
+Golden Boy is validated, as of 2026-09-17 (protocol `1.1.0`), against:
 
-- **186 Python tests**, 95% line coverage (`pytest --cov`) — up from 88 tests / 93% at v1.0.0
-- **14 TypeScript tests** (`npm test` in `sdk/typescript`), including real (non-mocked) integration tests against the actual installed CLI
-- Ruff and mypy clean (mypy checked under both 1.19.1 and 2.3.1)
-- `pip-audit`: 0 known vulnerabilities
-- Python 3.9–3.13, on GitHub Actions
-- A built wheel and sdist installed into an independent, fresh virtual environment, with every CLI command (including the new ones) exercised against it
+- **247 Python tests**, 95% line coverage (`pytest --cov`) — up from 186 tests / 95% on 2026-09-14 (the estimator/complexity/telemetry/calibration/multi-label upgrade added 61 tests; see CHANGELOG.md)
+- **21 TypeScript tests** (`npm test` in `sdk/typescript`), including real (non-mocked) integration tests against the actual installed CLI
+- Ruff and mypy clean, this environment (mypy 2.3.1) — mypy 1.19.1 compatibility was verified on 2026-09-14 and not independently re-run on 2026-09-17; CI (`mypy` job) checks the installed resolver's version on every push
+- `pip-audit`: 0 known vulnerabilities (re-run 2026-09-17)
+- Python 3.9–3.13, on GitHub Actions (Ubuntu only — see [Limitations](#-limitations) and `ARCHITECTURE_AUDIT.md` §8 on cross-platform CI)
+- A built wheel and sdist installed into an independent, fresh virtual environment, with every CLI command (including `report`/`calibrate`) exercised against it
 - A core-only install (`pip install goldenboy`) pulling zero third-party runtime dependencies — verified live via `pip list` against a clean-room install, not merely asserted
 
 CI (`.github/workflows/ci.yml`, 8 jobs):
@@ -715,24 +798,28 @@ CI (`.github/workflows/ci.yml`, 8 jobs):
 
 ## 📊 Benchmarks
 
-Measured once, locally (Apple M1 Pro, macOS arm64, Python 3.13.7, 2026-09-13) via `goldenboy benchmark` /
+Measured locally (Apple M1 Pro, macOS arm64, Python 3.13.7) via `goldenboy benchmark` /
 `scripts/benchmark.py` (one shared implementation — see `goldenboy/core/benchmark.py`) — not part of CI's
 pass/fail gate (CI only checks the numbers are non-negative and the estimator is deterministic), not a
 guarantee. Re-run it yourself before relying on these numbers for anything.
 
 | Operation | Mean | Median | n |
 |---|---|---|---|
-| `Estimator.estimate_task()` (warm, this repo) | 9.30ms | 8.79ms | 20 |
+| `Estimator.estimate_task()` (warm, this repo, 2026-09-17) | 41.44ms | 40.81ms | 20 |
 | `Estimator.estimate_task()` determinism | PASS — 1 distinct result across 10 identical calls | | 10 |
 | `RiskEngine.assess()` | <0.001ms | <0.001ms | 1000 |
-| CLI cold start (`goldenboy status`) | 93.46ms | 93.33ms | 5 |
+| CLI cold start (`goldenboy status`) | 119.09ms | 118.73ms | 5 |
 
 `RiskEngine.assess()` is pure arithmetic on already-computed values, so it's sub-microsecond by
-construction. Estimator latency scales with repository size (bounded by the `_MAX_SCAN_FILES` /
-`_MAX_FILE_BYTES` caps), not prompt length. CLI cold start is mostly Python interpreter/import overhead —
-it's what you actually feel running any single `goldenboy` command. Full methodology, caveats, and the
-Rust-migration reasoning built on these numbers: [`BENCHMARKS.md`](BENCHMARKS.md) and
-[`docs/LANGUAGE_STRATEGY.md`](docs/LANGUAGE_STRATEGY.md).
+construction. `Estimator.estimate_task()` went from 9.30ms (2026-09-13) to 41.44ms (2026-09-17) — a real,
+measured increase, not noise: it now walks the repo tree twice (once for the whole-repo size figure, once
+scoring which files the task text actually points at — see [Key Capabilities](#-key-capabilities)) plus
+scores the task's own complexity signals. Still bounded by `_MAX_SCAN_FILES`/`_MAX_FILE_BYTES` and still
+imperceptible next to CLI cold start; see `BENCHMARKS.md`'s 2026-09-17 entry and
+`benchmarks/results/2026-09-17-scaling.md` for the full repo-size/prompt-size scaling curves. CLI cold
+start is mostly Python interpreter/import overhead — it's what you actually feel running any single
+`goldenboy` command. Full methodology, caveats, and the Rust-migration reasoning built on these numbers:
+[`BENCHMARKS.md`](BENCHMARKS.md) and [`docs/LANGUAGE_STRATEGY.md`](docs/LANGUAGE_STRATEGY.md).
 
 ---
 
@@ -740,20 +827,23 @@ Rust-migration reasoning built on these numbers: [`BENCHMARKS.md`](BENCHMARKS.md
 
 **Shipped, tested, real:**
 
-- ✓ Task-aware cost estimation, adaptive execution modes, checkpoint/defer/resume, usage confidence incl. STALE detection
-- ✓ CLI (`plan`/`run`/`status`/`resume`/`doctor`/`analyze`/`validate`/`replay`/`benchmark`/`export`)
+- ✓ Task-aware cost estimation from *relevant* repo context (not whole-repo size) + an independent, explainable complexity model, adaptive execution modes, checkpoint/defer/resume, usage confidence incl. STALE detection
+- ✓ CLI (`plan`/`run`/`status`/`resume`/`doctor`/`analyze`/`validate`/`replay`/`report`/`calibrate`/`benchmark`/`export`)
 - ✓ Anthropic/OpenAI provider adapters, Claude Code skill integration
 - ✓ Golden Boy Protocol (versioned, language-neutral) + TypeScript SDK
-- ✓ Task classification (`TaskClassifier`) + `DecisionEngine` (explained action/confidence/reason)
+- ✓ Task classification (`TaskClassifier`, incl. secondary types) + `DecisionEngine` (explained action/confidence/reason)
 - ✓ Local history (`HistoryStore`) + data-quality/analytics reports
 - ✓ Baseline policies + `goldenboy.replay` backtest engine + walk-forward splitting
+- ✓ Execution telemetry contract (`ExecutionTelemetry`/`TelemetryStore`) + `goldenboy.core.calibration` (estimated-vs-actual MAE/RMSE/bias)
+- ✓ Benchmarking against deliberately large synthetic repos/history logs (`scripts/benchmark_scaling.py`)
 
 | Direction | Status |
 |---|---|
-| A real, populated backtest result (not `N/A`) | Blocked on real usage data accumulating — cannot be produced honestly today |
+| A real, populated backtest/calibration result (not `N/A`/insufficient-data) | Blocked on real usage data + telemetry accumulating — cannot be produced honestly today |
 | A learned task classifier / policy | Research — needs real labeled outcome data first |
 | Split `cli.py` into a `cli/` package | Planned — deferred this cycle (regression risk vs. benefit; see `ROADMAP.md`) |
-| Benchmarking against a deliberately large synthetic repo | Planned |
+| Cross-platform CI (macOS/Windows smoke tests) | Planned — see `ARCHITECTURE_AUDIT.md` §8 |
+| `HistoryStore`/`TelemetryStore` streaming reads at very large log sizes | Planned — measured fine through 100MB/~214K events (`benchmarks/results/2026-09-17-scaling.md`); not yet a real problem |
 | Additional agent integrations (e.g. Codex) | Research — only with a real, documented usage signal to build against |
 
 Nothing above is claimed production-ready unless it's also covered by tests. Full breakdown of

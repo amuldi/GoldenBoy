@@ -29,6 +29,8 @@ function parseTaskProfile(raw: unknown): TaskProfile {
     estimated_cost_percentage: requireField(raw, "estimated_cost_percentage", "TaskProfile") as number,
     estimated_cost_confidence: requireField(raw, "estimated_cost_confidence", "TaskProfile") as number,
     signals: (raw.signals as Record<string, number> | undefined) ?? {},
+    complexity_signals: (raw.complexity_signals as string[] | undefined) ?? [],
+    secondary_task_types: (raw.secondary_task_types as string[] | undefined) ?? [],
   };
 }
 

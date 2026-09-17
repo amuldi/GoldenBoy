@@ -82,6 +82,89 @@ def test_fallback_token_counter_distinguishes_equal_word_count_prompts(monkeypat
     assert short != long
 
 
+def test_relevant_context_is_zero_when_task_matches_no_file_path(tmp_path, monkeypatch):
+    """Regression test for the P0 finding in ARCHITECTURE_AUDIT.md: a task
+    whose wording matches nothing in the repo must not silently fall back
+    to scanning everything -- it should report zero relevant context, not
+    a repo-sized number."""
+    _write(str(tmp_path / "src" / "unrelated_module.py"), "def handler():\n    return 1\n")
+    monkeypatch.chdir(tmp_path)
+
+    estimator = Estimator()
+    tokens, count = estimator._estimate_relevant_context("Fix a typo in the login page")
+
+    assert tokens == 0
+    assert count == 0
+
+
+def test_relevant_context_matches_files_by_keyword_in_path(tmp_path, monkeypatch):
+    _write(str(tmp_path / "auth" / "login.py"), "def login():\n    return True\n" * 5)
+    _write(str(tmp_path / "billing" / "invoice.py"), "def invoice():\n    return True\n" * 500)
+    monkeypatch.chdir(tmp_path)
+
+    estimator = Estimator()
+    tokens, count = estimator._estimate_relevant_context("Fix a bug in the login flow")
+
+    # Only auth/login.py should match "login" -- billing/invoice.py (much
+    # larger) must not be pulled in just because it also exists in the repo.
+    assert count == 1
+    login_tokens = estimator._count_tokens((tmp_path / "auth" / "login.py").read_text())
+    assert tokens == login_tokens
+
+
+def test_two_tasks_in_the_same_repo_get_different_estimates(tmp_path, monkeypatch):
+    """The exact regression this upgrade targets: before the fix, a tiny
+    task and a large architectural task in the same (non-trivial) repo
+    landed on the same estimated_percentage because repo size dominated
+    the formula. They must now differ. A small `max_budget_tokens` (as in
+    `test_estimate_scales_with_prompt_length`) keeps both estimates above
+    the 5% floor so the difference is actually visible."""
+    from goldenboy.core.config import GoldenBoyConfig
+
+    for i in range(30):
+        _write(str(tmp_path / "pkg" / f"module_{i}.py"), "x = 1\n" * 200)
+    monkeypatch.chdir(tmp_path)
+
+    estimator = Estimator(config=GoldenBoyConfig(max_budget_tokens=200))
+    small = estimator.estimate_task("Fix a typo in the help text")
+    large = estimator.estimate_task(
+        "Re-architect the data model and migrate the storage layer to the new "
+        "schema across all modules, with full test coverage"
+    )
+
+    assert small.estimated_percentage != large.estimated_percentage
+    assert large.complexity_score > small.complexity_score
+
+
+def test_confidence_is_lower_when_no_relevant_files_are_found(tmp_path, monkeypatch):
+    import goldenboy.core.estimator as estimator_module
+
+    _write(str(tmp_path / "app.py"), "x = 1\n")
+    monkeypatch.chdir(tmp_path)
+
+    estimator = Estimator()
+    estimate = estimator.estimate_task("Fix a typo nowhere near any real file")
+    full_confidence = 0.85 if estimator_module.HAS_TIKTOKEN else 0.50
+
+    assert estimate.relevant_file_count == 0
+    assert estimate.confidence < full_confidence
+
+
+def test_repository_tokens_is_still_reported_separately_from_relevant_context(tmp_path, monkeypatch):
+    """`repository_tokens` (whole-repo size) must still be computed and
+    exposed for transparency, even though it no longer feeds the cost
+    total directly."""
+    _write(str(tmp_path / "auth" / "login.py"), "def login():\n    return True\n")
+    _write(str(tmp_path / "unrelated.py"), "x = 1\n" * 100)
+    monkeypatch.chdir(tmp_path)
+
+    estimator = Estimator()
+    estimate = estimator.estimate_task("Fix the login flow")
+
+    assert estimate.repository_tokens > estimate.relevant_context_tokens
+    assert estimate.relevant_context_tokens > 0
+
+
 def test_estimate_plan_falls_back_to_config_base_cost():
     from goldenboy.core.config import GoldenBoyConfig
     from goldenboy.core.priorities import ExecutionUnit, Priority

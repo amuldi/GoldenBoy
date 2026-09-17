@@ -10,6 +10,7 @@ from goldenboy.adapters.mock import MockProvider
 from goldenboy.analytics import data_quality
 from goldenboy.analytics.engine import analyze as run_analytics
 from goldenboy.core.benchmark import run_all as run_benchmark
+from goldenboy.core.calibration import calibrate
 from goldenboy.core.checkpoint import CheckpointManager
 from goldenboy.core.config import GoldenBoyConfig
 from goldenboy.core.decision_engine import DecisionEngine
@@ -19,6 +20,12 @@ from goldenboy.core.executor import AdaptiveExecutor
 from goldenboy.core.history import HistoryStore
 from goldenboy.core.priorities import ExecutionUnit, Priority
 from goldenboy.core.risk import RiskEngine
+from goldenboy.core.telemetry import (
+    VALID_OUTCOMES,
+    VALID_VERIFICATION_STATUSES,
+    ExecutionTelemetry,
+    TelemetryStore,
+)
 from goldenboy.replay.engine import run_backtest
 
 _TASK_DISPLAY_LIMIT = 100  # display-only truncation; the full text still drives the estimate
@@ -132,7 +139,7 @@ def plan_cmd(args):
     print(f"--- Execution Plan: '{_display_task(args.task)}' ---")
     _print_budget(budget)
     print(
-        f"Estimated Cost (heuristic, based on prompt + repo size): "
+        f"Estimated Cost (heuristic, based on prompt + relevant repo context + expected output): "
         f"{task_estimate.estimated_percentage:.2f}% (confidence: {task_estimate.confidence:.2f})"
     )
     print(f"Risk Assessment: {mode.name}\n")
@@ -311,7 +318,11 @@ def analyze_cmd(args):
         f"Task type:        {decision.task.task_type} "
         f"(confidence: {decision.task.task_type_confidence:.2f})"
     )
+    if decision.task.secondary_task_types:
+        print(f"Also detected:    {', '.join(decision.task.secondary_task_types)}")
     print(f"Complexity:       {decision.task.complexity_label} ({decision.task.complexity:.2f})")
+    if decision.task.complexity_signals:
+        print(f"Complexity signals: {', '.join(decision.task.complexity_signals)}")
     print(
         f"Estimated cost:   {decision.task.estimated_cost_percentage:.2f}% "
         f"(confidence: {decision.task.estimated_cost_confidence:.2f})"
@@ -392,6 +403,108 @@ def replay_cmd(args):
             "corrupted_lines": result.corrupted_lines,
             "policies": [asdict(m) for m in report.policies],
             "limitations": report.limitations,
+        }
+        print(json_module.dumps(payload, indent=2))
+        return
+
+    if not args.quiet and result.corrupted_lines:
+        print(f"Note: {result.corrupted_lines} corrupted line(s) skipped while loading the dataset.\n")
+    print(report.render())
+
+
+def _telemetry_store_for(dataset_path):
+    """Same resolution rule as `_history_store_for`, for
+    `.goldenboy/telemetry.jsonl` (or an explicit `--dataset` file)."""
+    if not dataset_path:
+        return TelemetryStore()
+    directory = os.path.dirname(dataset_path) or "."
+    filename = os.path.basename(dataset_path)
+    return TelemetryStore(history_dir=directory, filename=filename)
+
+
+def report_cmd(args):
+    """Records one `ExecutionTelemetry` event -- what an external agent
+    actually observed after acting on a prior `goldenboy analyze` decision.
+    See `goldenboy.core.telemetry` for the full field contract and why
+    every field but `--outcome` is optional."""
+    if args.json_file:
+        try:
+            with open(args.json_file, "r", encoding="utf-8") as f:
+                data = json_module.load(f)
+        except OSError as e:
+            print(f"error: could not read '{args.json_file}': {e}", file=sys.stderr)
+            raise SystemExit(1)
+        except json_module.JSONDecodeError as e:
+            print(f"error: '{args.json_file}' is not valid JSON: {e}", file=sys.stderr)
+            raise SystemExit(1)
+        if "final_outcome" not in data:
+            print("error: telemetry JSON file is missing required field 'final_outcome'", file=sys.stderr)
+            raise SystemExit(1)
+        # schema_version/recorded_at/actual_cost_percentage are set by
+        # create() itself (the last is derived, not an input) -- dropped
+        # here so a file that happens to be a previously-recorded event's
+        # own to_dict() output can still be re-ingested.
+        _derived_only = ("schema_version", "recorded_at", "actual_cost_percentage")
+        kwargs = {k: v for k, v in data.items() if k not in _derived_only}
+    else:
+        if not args.outcome:
+            print("error: 'report' requires either --outcome or --json-file", file=sys.stderr)
+            raise SystemExit(1)
+        kwargs = dict(
+            final_outcome=args.outcome,
+            verification_status=args.verification_status,
+            failure_reason=args.failure_reason,
+            task_id=args.task_id,
+            execution_id=args.execution_id,
+            task_type=args.task_type,
+            estimated_cost_percentage=args.estimated_cost_percentage,
+            estimated_cost_confidence=args.estimated_cost_confidence,
+            actual_input_tokens=args.actual_input_tokens,
+            actual_output_tokens=args.actual_output_tokens,
+            actual_total_tokens=args.actual_total_tokens,
+            actual_cost_usd=args.actual_cost_usd,
+            duration_seconds=args.duration_seconds,
+            tool_calls=args.tool_calls,
+            files_touched=args.files_touched,
+            lines_added=args.lines_added,
+            lines_removed=args.lines_removed,
+            tests_run=args.tests_run,
+            tests_passed=args.tests_passed,
+            tests_failed=args.tests_failed,
+            retry_count=args.retry_count,
+        )
+
+    try:
+        event = ExecutionTelemetry.create(**kwargs)
+    except (ValueError, TypeError) as e:
+        print(f"error: invalid telemetry: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    TelemetryStore().append(event)
+
+    if args.json:
+        print(json_module.dumps(event.to_dict(), indent=2))
+    elif not args.quiet:
+        detail = f"outcome={event.final_outcome}"
+        if event.verification_status:
+            detail += f", verification={event.verification_status}"
+        if event.actual_cost_percentage is not None:
+            detail += f", actual_cost={event.actual_cost_percentage:.2f}%"
+        print(f"Recorded telemetry: {detail}")
+
+
+def calibrate_cmd(args):
+    store = _telemetry_store_for(args.dataset)
+    result = store.load_events()
+    report = calibrate(result.events)
+
+    if args.json:
+        payload = {
+            "sample_count": len(result.events),
+            "corrupted_lines": result.corrupted_lines,
+            "excluded_missing_data": report.excluded_missing_data,
+            "overall": asdict(report.overall),
+            "by_task_type": {k: asdict(v) for k, v in report.by_task_type.items()},
         }
         print(json_module.dumps(payload, indent=2))
         return
@@ -513,6 +626,67 @@ def build_parser() -> ArgumentParser:
     p_replay.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of a table")
     p_replay.add_argument("--quiet", action="store_true", help="Suppress non-essential notes")
 
+    p_report = subparsers.add_parser(
+        "report",
+        help="Record actual execution telemetry for a task Golden Boy previously analyzed",
+    )
+    p_report.add_argument(
+        "--outcome", type=str, default=None, choices=sorted(VALID_OUTCOMES),
+        help="What the execution concluded with (required unless --json-file is given)",
+    )
+    p_report.add_argument(
+        "--verification-status", dest="verification_status", type=str, default=None,
+        choices=sorted(VALID_VERIFICATION_STATUSES),
+        help="Whether the outcome was actually backed by collected evidence (e.g. a real test run)",
+    )
+    p_report.add_argument("--failure-reason", dest="failure_reason", type=str, default=None)
+    p_report.add_argument("--task-id", dest="task_id", type=str, default=None)
+    p_report.add_argument("--execution-id", dest="execution_id", type=str, default=None)
+    p_report.add_argument(
+        "--task-type", dest="task_type", type=str, default=None,
+        help="Echo of the task_type from the original 'goldenboy analyze' decision, for calibration",
+    )
+    p_report.add_argument(
+        "--estimated-cost-percentage", dest="estimated_cost_percentage", type=float, default=None,
+        help="Echo of estimated_cost_percentage from the original 'goldenboy analyze' decision",
+    )
+    p_report.add_argument(
+        "--estimated-cost-confidence", dest="estimated_cost_confidence", type=float, default=None,
+    )
+    p_report.add_argument("--actual-input-tokens", dest="actual_input_tokens", type=int, default=None)
+    p_report.add_argument("--actual-output-tokens", dest="actual_output_tokens", type=int, default=None)
+    p_report.add_argument(
+        "--actual-total-tokens", dest="actual_total_tokens", type=int, default=None,
+        help="Used with --estimated-cost-percentage to compute calibration error",
+    )
+    p_report.add_argument("--actual-cost-usd", dest="actual_cost_usd", type=float, default=None)
+    p_report.add_argument("--duration-seconds", dest="duration_seconds", type=float, default=None)
+    p_report.add_argument("--tool-calls", dest="tool_calls", type=int, default=None)
+    p_report.add_argument("--files-touched", dest="files_touched", type=int, default=None)
+    p_report.add_argument("--lines-added", dest="lines_added", type=int, default=None)
+    p_report.add_argument("--lines-removed", dest="lines_removed", type=int, default=None)
+    p_report.add_argument("--tests-run", dest="tests_run", type=int, default=None)
+    p_report.add_argument("--tests-passed", dest="tests_passed", type=int, default=None)
+    p_report.add_argument("--tests-failed", dest="tests_failed", type=int, default=None)
+    p_report.add_argument("--retry-count", dest="retry_count", type=int, default=None)
+    p_report.add_argument(
+        "--json-file", dest="json_file", type=str, default=None,
+        help="Read the full telemetry record from a JSON file instead of the flags above",
+    )
+    p_report.add_argument("--json", action="store_true", help="Emit the recorded record as JSON")
+    p_report.add_argument("--quiet", action="store_true", help="Suppress the confirmation line")
+
+    p_calibrate = subparsers.add_parser(
+        "calibrate",
+        help="Compare estimated vs. actual cost (MAE/RMSE/bias) over recorded execution telemetry",
+    )
+    p_calibrate.add_argument(
+        "--dataset", type=str, default=None,
+        help="Path to a telemetry JSONL file (default: this project's .goldenboy/telemetry.jsonl)",
+    )
+    p_calibrate.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text")
+    p_calibrate.add_argument("--quiet", action="store_true", help="Suppress non-essential notes")
+
     p_benchmark = subparsers.add_parser(
         "benchmark", help="Measure estimator/risk-engine/CLI-startup latency on this machine, now"
     )
@@ -557,6 +731,10 @@ def main():
             validate_cmd(args)
         elif args.command == "replay":
             replay_cmd(args)
+        elif args.command == "report":
+            report_cmd(args)
+        elif args.command == "calibrate":
+            calibrate_cmd(args)
         elif args.command == "benchmark":
             benchmark_cmd(args)
         elif args.command == "export":

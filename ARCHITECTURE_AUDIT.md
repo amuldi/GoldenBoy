@@ -180,6 +180,19 @@ re-confirmed by this audit's numbers:
 
 ## 7. A real accuracy finding (not a language question)
 
+> **Update (2026-09-17): fixed.** The finding below is preserved as-written
+> (it was real, and the reasoning for not fixing it *in this audit*, at the
+> time, was sound). It was subsequently fixed in the
+> "evidence-driven intelligence & telemetry" upgrade —
+> `Estimator._estimate_relevant_context` (context relevance, scored per-file
+> from the task text rather than the whole repo) and
+> `goldenboy.core.complexity` (an independent complexity signal). See
+> CHANGELOG.md's "[Unreleased]" entry and `ROADMAP.md` for the before/after
+> evidence (`benchmarks/results/2026-09-17-policy-validation-BEFORE-p0-fix.md`
+> vs. `benchmarks/results/2026-09-17-policy-validation.md`: the same 8
+> scenarios went from a uniform ~66.4–66.5% to 5.0%–28.5%, correctly
+> differentiated).
+
 Running the new workload-validation harness
 (`scripts/validate_policy.py` → `benchmarks/results/2026-09-15-policy-validation.md`)
 surfaced something worth flagging on its own: **`Estimator.estimate_task()`

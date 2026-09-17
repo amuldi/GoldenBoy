@@ -24,7 +24,7 @@ versioned reference the two are tested against, per language.
 ## Design goals
 
 - **Versioned.** Every payload carries `schema_version` (currently
-  `"1.0.0"`). A reader only refuses a payload whose *major* version it
+  `"1.1.0"`). A reader only refuses a payload whose *major* version it
   doesn't understand — additive, backward-compatible fields bump
   minor/patch and don't break older readers.
 - **Provider- and language-independent.** Plain JSON: strings, numbers,
@@ -44,16 +44,18 @@ versioned reference the two are tested against, per language.
 
 ```jsonc
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "generated_at": "2026-09-14T06:06:46.403936+00:00",   // ISO 8601, UTC
 
   "task": {
     "task_type": "bug_fix",                // one of goldenboy.core.task_types.TaskType
     "task_type_confidence": 0.72,           // heuristic match-strength, 0.0-1.0 -- NOT a calibrated probability
-    "complexity": 0.05,                     // estimated_cost_percentage / 100, clamped to [0, 1]
+    "secondary_task_types": ["testing"],    // other types that also scored meaningfully; [] if none did
+    "complexity": 0.05,                     // heuristic weighted-signal score, 0.0-1.0 (goldenboy.core.complexity) -- NOT a calibrated probability
     "complexity_label": "LOW",              // LOW | MEDIUM | HIGH | VERY_HIGH
+    "complexity_signals": ["refactor_keyword"], // which fixed complexity signals fired, for transparency/debugging
     "estimated_cost_percentage": 5.0,       // Estimator's real, measured estimate
-    "estimated_cost_confidence": 0.85,      // 0.85 with tiktoken installed, 0.50 on the fallback heuristic
+    "estimated_cost_confidence": 0.85,      // 0.85 with tiktoken installed, 0.50 on the fallback heuristic; multiplied by 0.7 if no relevant file-path evidence was found
     "signals": { "bug_fix:\\bbugs?\\b": 2 } // which keyword patterns matched, for transparency/debugging
   },
 
@@ -153,3 +155,14 @@ use case. Revisit only if a concrete need for network-transparent access
 - `from_dict`/`parseDecision` reject a payload whose major version differs
   from what they implement, with a `ProtocolError` naming both versions —
   never a silent misread.
+
+### Version history
+
+- **1.0.0** (2026-09-14): initial protocol.
+- **1.1.0** (2026-09-17): additive `TaskProfile.complexity_signals` and
+  `TaskProfile.secondary_task_types` fields. `TaskProfile.complexity`'s
+  *value* also changed — it now comes from `goldenboy.core.complexity`
+  (an independent signal derived from the task text) rather than being
+  back-computed from `estimated_cost_percentage`. The field's name, type,
+  and range (`[0, 1]`) are unchanged; only its computation is. See
+  CHANGELOG.md.

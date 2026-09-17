@@ -70,6 +70,10 @@ jobs:
           /tmp/verify-install/bin/goldenboy doctor --json
           /tmp/verify-install/bin/goldenboy validate
           /tmp/verify-install/bin/goldenboy replay
+          /tmp/verify-install/bin/goldenboy report --outcome completed --task-type bug_fix --estimated-cost-percentage 8.0 --actual-total-tokens 9000
+          /tmp/verify-install/bin/goldenboy report --outcome completed --task-type bug_fix --estimated-cost-percentage 8.0 --actual-total-tokens 9000 --json
+          /tmp/verify-install/bin/goldenboy calibrate
+          /tmp/verify-install/bin/goldenboy calibrate --json
           /tmp/verify-install/bin/goldenboy export --output /tmp/verify-install-export.json
 
       - name: Benchmark sanity check (runs cleanly, latency is non-negative -- not a performance gate)

@@ -30,7 +30,13 @@ from goldenboy.core.errors import GoldenBoyError
 # bump minor/patch for additive, backward-compatible changes. `from_dict`
 # only rejects a payload whose *major* version it doesn't understand --
 # the same tolerance CheckpointManager applies to its own schema version.
-PROTOCOL_VERSION = "1.0.0"
+#
+# 1.1.0: additive `TaskProfile.complexity_signals` field, plus a behavior
+# change to how the existing `TaskProfile.complexity` value is computed
+# (see that field's docstring) -- shape is unchanged and old readers using
+# `.get("complexity_signals", [])` degrade gracefully, so this is a minor
+# bump, not major.
+PROTOCOL_VERSION = "1.1.0"
 
 
 class ProtocolError(GoldenBoyError):
@@ -58,11 +64,23 @@ class TaskProfile:
 
     task_type: str
     task_type_confidence: float
-    complexity: float  # 0.0-1.0, derived from Estimator's real cost estimate
+    # 0.0-1.0, heuristic weighted-signal strength from
+    # `goldenboy.core.complexity.estimate_task_complexity` -- NOT a
+    # calibrated probability. `complexity_signals` below names which fixed
+    # signals fired (see that module). Prior schema versions derived this
+    # value from the cost estimate instead of the task text directly; the
+    # field name and type are unchanged, only how it's computed.
+    complexity: float
     complexity_label: str  # LOW / MEDIUM / HIGH / VERY_HIGH
     estimated_cost_percentage: float
     estimated_cost_confidence: float
     signals: Dict[str, int] = field(default_factory=dict)
+    complexity_signals: List[str] = field(default_factory=list)
+    # Other task types that also scored meaningfully, alongside the
+    # primary `task_type` above -- see
+    # `goldenboy.core.task_classifier.TaskClassification.secondary_task_types`.
+    # Added in PROTOCOL_VERSION 1.1.0; absent on payloads from older writers.
+    secondary_task_types: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -78,6 +96,8 @@ class TaskProfile:
             estimated_cost_percentage=_require(data, "estimated_cost_percentage", ctx),
             estimated_cost_confidence=_require(data, "estimated_cost_confidence", ctx),
             signals=data.get("signals", {}),
+            complexity_signals=data.get("complexity_signals", []),
+            secondary_task_types=data.get("secondary_task_types", []),
         )
 
 

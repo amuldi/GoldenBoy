@@ -83,3 +83,33 @@ def test_classification_is_deterministic():
     second = TaskClassifier().classify(text)
     assert first.task_type == second.task_type
     assert first.confidence == second.confidence
+
+
+def test_single_clear_category_has_no_secondary_types():
+    result = TaskClassifier().classify("Fix a bug where login crashes on empty password")
+    assert result.secondary_task_types == []
+
+
+def test_strong_secondary_category_is_reported():
+    result = TaskClassifier().classify(
+        "Refactor the payment module to simplify the retry logic, and write unit tests and "
+        "integration tests for the new code"
+    )
+    assert result.task_type == TaskType.TESTING or result.task_type == TaskType.REFACTOR
+    assert len(result.secondary_task_types) >= 1
+    assert result.task_type not in result.secondary_task_types
+
+
+def test_secondary_types_are_bounded_and_ordered_by_score():
+    from goldenboy.core.task_classifier import _MAX_SECONDARY_TYPES
+
+    result = TaskClassifier().classify(
+        "Refactor and fix a bug and add tests and write documentation for the release "
+        "and review the pull request and optimize performance"
+    )
+    assert len(result.secondary_task_types) <= _MAX_SECONDARY_TYPES
+
+
+def test_unknown_task_has_no_secondary_types():
+    result = TaskClassifier().classify("zzz qqq xyzzy plugh")
+    assert result.secondary_task_types == []

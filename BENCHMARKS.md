@@ -25,6 +25,34 @@ synthetic repositories and multi-hundred-MB files on disk) rather than
 milliseconds, so it isn't part of the routine "run this before relying on
 these numbers" workflow this file documents.
 
+## 2026-09-17 — Apple M1 Pro, macOS (arm64), Python 3.13.7 (after the context-relevance/complexity upgrade)
+
+```
+Estimator.estimate_task() [warm, this repo]: mean=41.442ms median=40.810ms min=40.122ms max=50.703ms (n=20)
+Estimator.estimate_task() determinism: PASS (1 distinct result(s) across 10 identical calls)
+RiskEngine.assess(): mean=0.000ms median=0.000ms min=0.000ms max=0.008ms (n=1000)
+CLI cold start (`goldenboy status`): mean=119.089ms median=118.726ms min=115.962ms max=125.254ms (n=5)
+```
+
+`Estimator.estimate_task()` went from ~9.3ms (2026-09-13, below) to ~41.4ms
+here — a real, measured ~4.5x increase, not noise. Root cause: the P0 fix
+in `ARCHITECTURE_AUDIT.md` §7 (context estimate dominated by repo size, not
+task size) replaced one file-tree walk with two — `_estimate_codebase_
+context` (unchanged, still walked for the now-secondary "repository size"
+figure) plus the new `_estimate_relevant_context` (scores every candidate
+file's *path* against the task's keywords before selecting which to read)
+— plus per-task complexity scoring (`goldenboy.core.complexity`). This
+repository's own source tree (~130 files) is still small enough that 41ms
+is imperceptible next to the ~119ms CLI cold-start it's part of. See
+`benchmarks/results/2026-09-17-scaling.md` for how this scales with
+repository size (200 vs. 5,000 files: 48.6ms vs. 59.5ms — the relevance
+scan does not reintroduce the old unbounded-scaling problem) and prompt
+size (a pathological ~25M-character prompt was briefly ~9s before a fix
+bounding how much of the prompt text the new complexity/keyword scoring
+regex-scans — see CHANGELOG.md and `tests/test_complexity.py::
+test_pathologically_large_prompt_does_not_hang` — down to ~0.56s, most of
+which is tiktoken encoding the prompt itself, not Golden Boy's own logic).
+
 ## 2026-09-13 — Apple M1 Pro, macOS (arm64), Python 3.13.7
 
 ```

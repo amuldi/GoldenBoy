@@ -10,8 +10,9 @@
  */
 
 /** Bump the major segment for a breaking change; the client only refuses a
- * payload whose *major* version it doesn't recognize (see `validate.ts`). */
-export const PROTOCOL_VERSION = "1.0.0";
+ * payload whose *major* version it doesn't recognize (see `validate.ts`).
+ * 1.1.0: additive `TaskProfile.complexity_signals` (see that field below). */
+export const PROTOCOL_VERSION = "1.1.0";
 
 export type TaskType =
   | "implementation"
@@ -44,11 +45,19 @@ export type UsageConfidence = "EXACT" | "ESTIMATED" | "STALE" | "UNKNOWN";
 export interface TaskProfile {
   task_type: TaskType | string;
   task_type_confidence: number;
+  /** Heuristic weighted-signal strength in [0, 1] from
+   * `goldenboy.core.complexity` — NOT a calibrated probability. */
   complexity: number;
   complexity_label: "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH" | string;
   estimated_cost_percentage: number;
   estimated_cost_confidence: number;
   signals: Record<string, number>;
+  /** Names of fixed complexity signals that fired (e.g. "architecture_keyword").
+   * Added in PROTOCOL_VERSION 1.1.0; absent/empty on older payloads. */
+  complexity_signals?: string[];
+  /** Other task types that also scored meaningfully alongside `task_type`.
+   * Added in PROTOCOL_VERSION 1.1.0; absent/empty on older payloads. */
+  secondary_task_types?: (TaskType | string)[];
 }
 
 export interface UsageSnapshot {

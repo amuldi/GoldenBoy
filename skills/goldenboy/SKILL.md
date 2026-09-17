@@ -66,3 +66,52 @@ Whenever you receive a large coding task:
 1. Output your estimated `Execution Mode` and a quick priority list before writing code.
 2. If in `LIMITED` or `CRITICAL` mode, only modify files necessary for P0/P1.
 3. Once the safe work is done, create a `goldenboy_checkpoint.md` artifact listing the deferred tasks and stop execution.
+
+## Closing the loop: reporting what actually happened
+
+Golden Boy does not observe your work itself — it only sees what you report
+back. After finishing (or abandoning) a task you ran `goldenboy analyze` on,
+report the real outcome with `goldenboy report`, echoing back the
+`estimated_cost_percentage` from that `analyze` call so Golden Boy can later
+compare estimate against reality (`goldenboy calibrate`):
+
+```
+goldenboy report --outcome completed \
+  --verification-status VERIFIED \
+  --task-type bug_fix \
+  --estimated-cost-percentage 12.0 \
+  --actual-total-tokens 18000 \
+  --tests-run 4 --tests-passed 4
+```
+
+- `--outcome` is the only required field (`completed` / `failed` / `partial`).
+  Every other field is optional — report what you actually know; do not
+  invent a number for a field you can't measure (e.g. omit `--tests-run` if
+  you didn't run tests, rather than reporting 0).
+- `--verification-status VERIFIED` means the outcome is backed by real,
+  collected evidence (e.g. an actual test-run exit code you saw) — not the
+  same as `--outcome completed`, which only means the work was attempted to
+  completion. Use `UNVERIFIED` if you completed the work but did not verify
+  it, and `PARTIALLY_VERIFIED` / `FAILED` as appropriate. See "Verification
+  vs. completion" below.
+- This never sends your prompt or code — only counts and labels (see
+  `goldenboy/core/telemetry.py`).
+- Golden Boy's own history/analytics/replay improve only as real reports
+  like this accumulate; skipping this step means the next `goldenboy
+  calibrate` still reports N/A / insufficient data, honestly.
+
+## Verification vs. completion
+
+Do not represent a task as done merely because your execution path
+returned without an exception. Distinguish, in your own summary to the
+user and in `--verification-status`:
+- **Completed but unverified**: you wrote the change but did not run
+  tests/build/lint to confirm it. Report `UNVERIFIED`.
+- **Completed and verified**: you actually ran the check (tests, build,
+  lint) and saw it pass. Report `VERIFIED`, and pass `--tests-run`/
+  `--tests-passed`/`--tests-failed` if applicable.
+- **Partially verified**: some but not all of the claimed change was
+  checked. Report `PARTIALLY_VERIFIED`.
+- Never claim verification you didn't perform — an unverified claim of
+  success reported as `VERIFIED` corrupts the very data
+  `goldenboy calibrate` and `goldenboy replay` rely on.

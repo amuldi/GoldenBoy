@@ -9,8 +9,13 @@ adds two things on top, deliberately kept out of RiskEngine itself so that
 class's existing behavior/tests never change:
 
 1. Task understanding: what kind of work this is (`TaskClassifier`) and how
-   complex it looks (reusing `Estimator`'s already-validated cost signal --
-   not a second, separately-invented complexity number).
+   complex it looks (`Estimator`'s `complexity_score`, from
+   `goldenboy.core.complexity` -- a real, independent signal derived from
+   the task text itself, which `Estimator.estimate_task()` also feeds into
+   its own cost formula. Earlier versions of this module back-computed
+   complexity from the cost percentage instead; that stopped being
+   necessary once complexity became the input to cost rather than the
+   other way around -- see CHANGELOG.md).
 2. A conservative confidence policy for budgets with UNKNOWN confidence
    (real adapters before their first `refresh_usage()` call, or any custom
    adapter that never sets `Budget.confidence`): an otherwise-SAFE verdict
@@ -35,14 +40,15 @@ from goldenboy.core.task_classifier import TaskClassification, TaskClassifier
 from goldenboy.core.task_types import DecisionAction
 from goldenboy.protocol import GoldenBoyDecision, RiskAssessment, TaskProfile, UsageSnapshot
 
-# Complexity-label thresholds against Estimator's estimated_percentage.
-# Fixed, documented constants (consistent with Estimator's own
-# _MAX_SCAN_FILES-style constants) rather than a new GoldenBoyConfig field:
-# this is a display bucketing of an existing measured signal, not an
-# independent policy threshold that changes what Golden Boy actually does.
-_COMPLEXITY_LOW_MAX = 25.0
-_COMPLEXITY_MEDIUM_MAX = 50.0
-_COMPLEXITY_HIGH_MAX = 75.0
+# Complexity-label thresholds against `TaskEstimate.complexity_score`
+# (0.0-1.0, see `goldenboy.core.complexity`). Fixed, documented constants
+# (consistent with Estimator's own _MAX_SCAN_FILES-style constants) rather
+# than a new GoldenBoyConfig field: this is a display bucketing of an
+# existing measured signal, not an independent policy threshold that
+# changes what Golden Boy actually does.
+_COMPLEXITY_LOW_MAX = 0.25
+_COMPLEXITY_MEDIUM_MAX = 0.50
+_COMPLEXITY_HIGH_MAX = 0.75
 
 # Below this combined confidence, DecisionEngine refuses to recommend an
 # action other than ASK_USER (except under CRITICAL, where stopping/
@@ -68,12 +74,12 @@ _BUDGET_CONFIDENCE_WEIGHT = {
 }
 
 
-def _complexity_label(estimated_percentage: float) -> str:
-    if estimated_percentage < _COMPLEXITY_LOW_MAX:
+def _complexity_label(complexity_score: float) -> str:
+    if complexity_score < _COMPLEXITY_LOW_MAX:
         return "LOW"
-    if estimated_percentage < _COMPLEXITY_MEDIUM_MAX:
+    if complexity_score < _COMPLEXITY_MEDIUM_MAX:
         return "MEDIUM"
-    if estimated_percentage < _COMPLEXITY_HIGH_MAX:
+    if complexity_score < _COMPLEXITY_HIGH_MAX:
         return "HIGH"
     return "VERY_HIGH"
 
@@ -248,8 +254,8 @@ class DecisionEngine:
         confidence = _combined_confidence(estimate, classification, budget)
         action, recommendation = _decide_action(effective_mode, progress, confidence)
 
-        complexity = min(1.0, estimate.estimated_percentage / 100.0)
-        complexity_label = _complexity_label(estimate.estimated_percentage)
+        complexity = estimate.complexity_score
+        complexity_label = _complexity_label(complexity)
 
         reason = _reason_text(
             classification.task_type.value, complexity_label, budget, estimate,
@@ -264,6 +270,8 @@ class DecisionEngine:
             estimated_cost_percentage=estimate.estimated_percentage,
             estimated_cost_confidence=estimate.confidence,
             signals=classification.signals,
+            complexity_signals=estimate.complexity_signals,
+            secondary_task_types=[t.value for t in classification.secondary_task_types],
         )
         usage_snapshot = UsageSnapshot(
             remaining_percentage=budget.remaining_percentage,

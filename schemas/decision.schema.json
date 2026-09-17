@@ -68,6 +68,18 @@
           "type": "object",
           "additionalProperties": { "type": "integer" },
           "default": {}
+        },
+        "complexity_signals": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Names of fixed, documented signals from goldenboy.core.complexity that fired for this task (e.g. \"architecture_keyword\", \"multi_step_scope\"). Added in PROTOCOL_VERSION 1.1.0; absent on payloads from older writers."
+        },
+        "secondary_task_types": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Other task types that also scored meaningfully alongside the primary task_type. Added in PROTOCOL_VERSION 1.1.0; absent on payloads from older writers."
         }
       },
       "additionalProperties": true
