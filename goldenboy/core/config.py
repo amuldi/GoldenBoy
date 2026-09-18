@@ -47,6 +47,11 @@ _RANGES = {
     # zero would make every reading stale the instant it's read, which is
     # never useful and almost certainly a misconfiguration.
     "stale_after_seconds": (0.0, None, False, False),
+    # How many times the same (tool, args, error) signature may repeat
+    # before `goldenboy.core.loop_detection.LoopDetector` recommends
+    # stopping. Must be >= 1 -- a threshold of 0 would flag the very first
+    # attempt as a loop, which is never the intent.
+    "loop_repeat_threshold": (1, None, True, False),
 }
 
 
@@ -94,6 +99,9 @@ class GoldenBoyConfig:
             as ESTIMATED before `UsageConfidence` ages it to STALE (see
             `AnthropicAdapter`/`OpenAIAdapter.get_available_budget()`).
             Valid range: (0, inf).
+        loop_repeat_threshold: How many repeats of the same (tool, args,
+            error) signature `goldenboy.core.loop_detection.LoopDetector`
+            allows before recommending a stop. Valid range: [1, inf).
 
     Raises:
         ConfigError: if constructed with a value outside the ranges above.
@@ -104,6 +112,7 @@ class GoldenBoyConfig:
     base_cost_per_unit: float = 2.0
     max_budget_tokens: int = 100_000
     stale_after_seconds: float = 300.0
+    loop_repeat_threshold: int = 3
 
     def __post_init__(self):
         for fld in fields(self):

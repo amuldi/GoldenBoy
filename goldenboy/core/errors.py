@@ -21,3 +21,14 @@ class ConfigError(GoldenBoyError):
 class CheckpointError(GoldenBoyError):
     """The checkpoint file is missing required data, corrupted, or from an
     incompatible future version."""
+
+
+class PolicyError(GoldenBoyError):
+    """The policy config file is missing required data, corrupted, or a
+    rule pattern in it does not compile."""
+
+
+class SnapshotError(GoldenBoyError):
+    """A git-based snapshot could not be created, verified, or rolled back
+    -- e.g. the working directory is not a git repository, or the
+    underlying `git` command failed."""

@@ -75,6 +75,24 @@ jobs:
           /tmp/verify-install/bin/goldenboy calibrate
           /tmp/verify-install/bin/goldenboy calibrate --json
           /tmp/verify-install/bin/goldenboy export --output /tmp/verify-install-export.json
+          /tmp/verify-install/bin/goldenboy policy bash --command "ls -la" --estimated-cost-percentage 5
+          /tmp/verify-install/bin/goldenboy policy bash --command "ls -la" --json
+          /tmp/verify-install/bin/goldenboy route "Fix a typo in README" --budget 50
+          /tmp/verify-install/bin/goldenboy route "Fix a typo in README" --budget 50 --json
+          /tmp/verify-install/bin/goldenboy audit
+          /tmp/verify-install/bin/goldenboy audit --json
+          /tmp/verify-install/bin/goldenboy spend record --label smoke --estimated-tokens 100 --actual-tokens 90
+          /tmp/verify-install/bin/goldenboy spend status --window all --json
+          /tmp/verify-install/bin/goldenboy loop record --tool smoke_tool
+          /tmp/verify-install/bin/goldenboy loop status
+          /tmp/verify-install/bin/goldenboy loop reset
+          /tmp/verify-install/bin/goldenboy failure record --cause "smoke test cause"
+          /tmp/verify-install/bin/goldenboy failure list --json
+          /tmp/verify-install/bin/goldenboy heartbeat
+          /tmp/verify-install/bin/goldenboy heartbeat --budget 50 --previous-budget 50 --json
+          /tmp/verify-install/bin/goldenboy snapshot create --label "ci smoke"
+          /tmp/verify-install/bin/goldenboy snapshot list
+          /tmp/verify-install/bin/goldenboy snapshot verify --check "python3 --version"
 
       - name: Benchmark sanity check (runs cleanly, latency is non-negative -- not a performance gate)
         run: |

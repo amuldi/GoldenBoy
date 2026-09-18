@@ -9,7 +9,9 @@ from dataclasses import asdict
 from goldenboy.adapters.mock import MockProvider
 from goldenboy.analytics import data_quality
 from goldenboy.analytics.engine import analyze as run_analytics
+from goldenboy.core.audit import AuditStore
 from goldenboy.core.benchmark import run_all as run_benchmark
+from goldenboy.core.budget import Budget
 from goldenboy.core.calibration import calibrate
 from goldenboy.core.checkpoint import CheckpointManager
 from goldenboy.core.config import GoldenBoyConfig
@@ -17,9 +19,23 @@ from goldenboy.core.decision_engine import DecisionEngine
 from goldenboy.core.errors import GoldenBoyError
 from goldenboy.core.estimator import Estimator
 from goldenboy.core.executor import AdaptiveExecutor
+from goldenboy.core.failure_memory import FailureMemoryStore
+from goldenboy.core.governance import ActionRequest, PolicyConfig, PolicyEngine, PolicyVerdict
+from goldenboy.core.heartbeat import check as heartbeat_check
 from goldenboy.core.history import HistoryStore
+from goldenboy.core.loop_detection import LoopDetector
 from goldenboy.core.priorities import ExecutionUnit, Priority
-from goldenboy.core.risk import RiskEngine
+from goldenboy.core.risk import ExecutionMode, RiskEngine
+from goldenboy.core.router import ModelRouter, RouterConfig
+from goldenboy.core.snapshot import SnapshotError, SnapshotManager
+from goldenboy.core.spending import (
+    SessionMarker,
+    SpendEntry,
+    SpendingStore,
+    filter_since,
+    filter_today,
+    summarize,
+)
 from goldenboy.core.telemetry import (
     VALID_OUTCOMES,
     VALID_VERIFICATION_STATUSES,
@@ -570,6 +586,330 @@ def export_cmd(args):
         print(text)
 
 
+def policy_cmd(args):
+    try:
+        config = PolicyConfig.load(args.policy_file) if args.policy_file else PolicyConfig.load()
+    except GoldenBoyError as e:
+        print(f"error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    audit_store = AuditStore() if args.audit else None
+    engine = PolicyEngine(config=config, audit_store=audit_store)
+    request = ActionRequest(
+        tool=args.tool,
+        command=args.shell_command,
+        file_paths=args.paths,
+        estimated_cost_percentage=args.estimated_cost_percentage,
+        session_calls_for_tool=args.session_calls,
+        session_spent_percentage=args.session_spent_percentage,
+        day_spent_percentage=args.day_spent_percentage,
+    )
+    result = engine.evaluate(request, task_id=args.task_id)
+
+    if args.json:
+        payload = {
+            "verdict": result.verdict.value,
+            "check": result.check,
+            "reason_code": result.reason_code,
+            "reason": result.reason,
+            "matched_rule": result.matched_rule,
+        }
+        print(json_module.dumps(payload, indent=2))
+    else:
+        print(f"Verdict: {result.verdict.value.upper()}")
+        print(f"Check:   {result.check}")
+        print(f"Reason:  {result.reason} ({result.reason_code})")
+        if result.matched_rule:
+            print(f"Matched: {result.matched_rule}")
+
+    if result.verdict == PolicyVerdict.DENY:
+        raise SystemExit(1)
+    if result.verdict == PolicyVerdict.REQUIRE_APPROVAL:
+        raise SystemExit(2)
+
+
+def route_cmd(args):
+    _require_nonblank_task(args.task, "route")
+    provider = MockProvider(initial_percentage=args.budget)
+    engine = DecisionEngine()
+    decision = engine.decide(args.task, provider)
+
+    try:
+        router_config = RouterConfig.load(args.router_file) if args.router_file else RouterConfig.load()
+    except GoldenBoyError as e:
+        print(f"error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    router = ModelRouter(config=router_config)
+    routing = router.route(decision.task.complexity_label, ExecutionMode(decision.risk.mode))
+
+    if args.json:
+        print(json_module.dumps(routing.to_dict(), indent=2))
+        return
+
+    if not args.quiet:
+        print(f"--- Golden Boy Model Router: '{_display_task(args.task)}' ---")
+    print(f"Complexity:   {routing.complexity_label} -> tier '{routing.complexity_tier.value}'")
+    print(f"Budget risk:  {routing.execution_mode} -> cap '{routing.budget_cap_tier.value}'")
+    print(f"Routed tier:  {routing.tier.value.upper()}")
+    model_note = routing.model_name or (
+        "(unconfigured — map tiers to real model names in .goldenboy/router.json)"
+    )
+    print(f"Model:        {model_note}")
+    print(f"Reason:       {routing.reason}")
+
+
+def audit_cmd(args):
+    store = AuditStore()
+    result = store.load_events()
+    entries = result.events[-args.limit:] if args.limit > 0 else result.events
+
+    if args.json:
+        payload = {
+            "total_lines": result.total_lines,
+            "corrupted_lines": result.corrupted_lines,
+            "entries": [e.to_dict() for e in entries],
+        }
+        print(json_module.dumps(payload, indent=2))
+        return
+
+    if not entries:
+        print("No audit entries recorded yet.")
+        return
+    for i, entry in enumerate(entries):
+        if i:
+            print()
+        print(entry.render())
+
+
+def spend_cmd(args):
+    store = SpendingStore()
+    marker = SessionMarker()
+
+    if args.action == "reset-session":
+        started = marker.reset()
+        if args.json:
+            print(json_module.dumps({"session_start": started}, indent=2))
+        else:
+            print(f"Session reset. New session start: {started}")
+        return
+
+    if args.action == "record":
+        if args.label is None or args.estimated_tokens is None:
+            print("error: 'spend record' requires --label and --estimated-tokens", file=sys.stderr)
+            raise SystemExit(1)
+        try:
+            entry = SpendEntry.create(
+                label=args.label,
+                estimated_tokens=args.estimated_tokens,
+                actual_tokens=args.actual_tokens,
+                task_type=args.task_type,
+            )
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            raise SystemExit(1)
+        store.append(entry)
+
+    result = store.load_events()
+    if args.window == "session":
+        entries = filter_since(result.entries, marker.get_or_create())
+    elif args.window == "daily":
+        entries = filter_today(result.entries)
+    else:
+        entries = result.entries
+
+    ledger = summarize(entries, limit_tokens=args.budget_limit, window=args.window)
+
+    if args.json:
+        print(json_module.dumps(asdict(ledger), indent=2))
+    else:
+        print(ledger.render())
+
+    if ledger.over_limit:
+        raise SystemExit(1)
+
+
+def snapshot_cmd(args):
+    mgr = SnapshotManager(repo_dir=args.repo_dir)
+
+    if args.action == "create":
+        try:
+            snap = mgr.create(label=args.label)
+        except SnapshotError as e:
+            print(f"error: {e}", file=sys.stderr)
+            raise SystemExit(1)
+        if args.json:
+            print(json_module.dumps(snap.to_dict(), indent=2))
+        else:
+            state = "clean tree" if snap.clean else "dirty tree captured"
+            print(f"Snapshot {snap.id} created ({state}) at HEAD {snap.head_sha[:12]}.")
+        return
+
+    if args.action == "list":
+        snaps = mgr.list()
+        if args.json:
+            print(json_module.dumps([s.to_dict() for s in snaps], indent=2))
+            return
+        if not snaps:
+            print("No snapshots recorded yet.")
+            return
+        for s in snaps:
+            print(f"{s.id}  {s.created_at}  {'clean' if s.clean else 'dirty'}  {s.label}")
+        return
+
+    if args.action == "verify":
+        if not args.checks:
+            print("error: 'snapshot verify' requires at least one --check", file=sys.stderr)
+            raise SystemExit(1)
+        result = mgr.verify(args.checks)
+        if args.json:
+            print(json_module.dumps(asdict(result), indent=2))
+        else:
+            print(result.render())
+
+        if not result.passed:
+            if args.rollback_on_fail:
+                try:
+                    target = mgr.rollback()
+                    print(f"Rolled back to snapshot {target.id}.")
+                except SnapshotError as e:
+                    print(f"error: rollback failed: {e}", file=sys.stderr)
+            raise SystemExit(1)
+        return
+
+    if args.action == "rollback":
+        target = None
+        if args.snapshot_id:
+            target = mgr.get(args.snapshot_id)
+            if target is None:
+                print(f"error: no snapshot with id '{args.snapshot_id}'", file=sys.stderr)
+                raise SystemExit(1)
+        try:
+            restored = mgr.rollback(target)
+        except SnapshotError as e:
+            print(f"error: {e}", file=sys.stderr)
+            raise SystemExit(1)
+        if args.json:
+            print(json_module.dumps(restored.to_dict(), indent=2))
+        else:
+            print(f"Rolled back to snapshot {restored.id} ({restored.label}).")
+
+
+def loop_cmd(args):
+    detector = LoopDetector(threshold=args.threshold)
+
+    if args.action == "reset":
+        detector.reset()
+        if args.json:
+            print(json_module.dumps({"reset": True}, indent=2))
+        else:
+            print("Loop-detection state cleared.")
+        return
+
+    if args.action == "status":
+        entries = detector.status()
+        if args.json:
+            print(json_module.dumps({sig: asdict(e) for sig, e in entries.items()}, indent=2))
+            return
+        if not entries:
+            print("No tracked signatures.")
+            return
+        for e in entries.values():
+            print(
+                f"{e.tool}: count={e.count} "
+                f"(signature={e.signature}, first={e.first_seen}, last={e.last_seen})"
+            )
+        return
+
+    if args.action == "record":
+        if not args.tool:
+            print("error: 'loop record' requires --tool", file=sys.stderr)
+            raise SystemExit(1)
+        result = detector.record(args.tool, args.args_summary, args.error_summary)
+        if args.json:
+            print(json_module.dumps(asdict(result), indent=2))
+        else:
+            print(f"Signature {result.signature} ({result.tool}): {result.count}/{result.threshold}")
+            print(result.recommendation)
+        if result.should_stop:
+            raise SystemExit(1)
+
+
+def failure_cmd(args):
+    store = FailureMemoryStore()
+
+    if args.action == "record":
+        if not args.cause:
+            print("error: 'failure record' requires --cause", file=sys.stderr)
+            raise SystemExit(1)
+        record = store.record(args.cause, task_type=args.task_type)
+        if args.json:
+            print(json_module.dumps(record.to_dict(), indent=2))
+        else:
+            print(f"Recorded (signature={record.signature}, attempt_count={record.attempt_count}).")
+        return
+
+    if args.action == "resolve":
+        if not args.signature or not args.resolution:
+            print("error: 'failure resolve' requires --signature and --resolution", file=sys.stderr)
+            raise SystemExit(1)
+        record = store.resolve(args.signature, args.resolution)
+        if record is None:
+            print(f"error: no failure record with signature '{args.signature}'", file=sys.stderr)
+            raise SystemExit(1)
+        if args.json:
+            print(json_module.dumps(record.to_dict(), indent=2))
+        else:
+            print(f"Marked resolved (signature={record.signature}).")
+        return
+
+    if args.action == "list":
+        records = store.load_all()
+        if args.json:
+            print(json_module.dumps([r.to_dict() for r in records], indent=2))
+            return
+        if not records:
+            print("No failure records yet.")
+            return
+        for r in records:
+            status = "resolved" if r.resolved else "open"
+            print(f"{r.signature}  attempts={r.attempt_count}  [{status}]  {r.cause_summary}")
+        return
+
+    if args.action == "similar":
+        if not args.cause:
+            print("error: 'failure similar' requires --cause", file=sys.stderr)
+            raise SystemExit(1)
+        similar = store.find_similar(args.cause, min_similarity=args.min_similarity)
+        if args.json:
+            payload = [{"similarity": s.similarity, "record": s.record.to_dict()} for s in similar]
+            print(json_module.dumps(payload, indent=2))
+            return
+        if not similar:
+            print("No similar past failures found.")
+            return
+        for s in similar:
+            print(
+                f"[{s.similarity:.2f}] {s.record.signature}  "
+                f"attempts={s.record.attempt_count}  {s.record.cause_summary}"
+            )
+
+
+def heartbeat_cmd(args):
+    budget_obj = None
+    if args.budget is not None:
+        budget_obj = Budget(remaining_percentage=args.budget, source="cli")
+
+    result = heartbeat_check(budget=budget_obj, previous_budget_percentage=args.previous_budget)
+
+    if args.json:
+        print(json_module.dumps(asdict(result), indent=2))
+        return
+
+    print(f"Should wake: {result.should_wake}")
+    for reason in result.reasons:
+        print(f"  - {reason}")
+
+
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(description="Golden Boy - Budget-Aware Execution Layer")
     parser.add_argument(
@@ -698,6 +1038,134 @@ def build_parser() -> ArgumentParser:
     p_export.add_argument("--output", type=str, default=None, help="Write to this path instead of stdout")
     p_export.add_argument("--quiet", action="store_true", help="Suppress the 'Exported to ...' confirmation")
 
+    p_policy = subparsers.add_parser(
+        "policy", help="Policy Engine: evaluate one action (ALLOW/DENY/REQUIRE_APPROVAL), code-enforced"
+    )
+    p_policy.add_argument(
+        "tool", type=str, help="Tool/action name being requested (e.g. 'bash', 'file_write')"
+    )
+    p_policy.add_argument(
+        "--command", dest="shell_command", type=str, default=None,
+        help="Shell command text, if this action runs one",
+    )
+    p_policy.add_argument(
+        "--path", dest="paths", action="append", default=[],
+        help="A file path this action touches (repeatable)",
+    )
+    p_policy.add_argument("--estimated-cost-percentage", type=float, default=0.0)
+    p_policy.add_argument(
+        "--session-calls", type=int, default=0,
+        help="How many times this tool has already been called this session",
+    )
+    p_policy.add_argument("--session-spent-percentage", type=float, default=0.0)
+    p_policy.add_argument("--day-spent-percentage", type=float, default=0.0)
+    p_policy.add_argument(
+        "--policy-file", type=str, default=None,
+        help="Path to a policy config JSON file (default: .goldenboy/policy.json)",
+    )
+    p_policy.add_argument("--task-id", type=str, default=None)
+    p_policy.add_argument("--audit", action="store_true", help="Also record this decision to the audit log")
+    p_policy.add_argument("--json", action="store_true")
+
+    p_route = subparsers.add_parser(
+        "route", help="Model Router: map task complexity + budget risk to a provider-neutral tier"
+    )
+    p_route.add_argument("task", type=str, help="The task to route")
+    p_route.add_argument("--budget", type=float, default=100.0, help="Mock starting budget")
+    p_route.add_argument(
+        "--router-file", type=str, default=None,
+        help="Path to a router config JSON file mapping tiers to real model names "
+        "(default: .goldenboy/router.json)",
+    )
+    p_route.add_argument("--json", action="store_true")
+    p_route.add_argument("--quiet", action="store_true", help="Suppress the header banner")
+
+    p_audit = subparsers.add_parser("audit", help="Show recent Audit Log entries")
+    p_audit.add_argument("--limit", type=int, default=20, help="Show at most this many recent entries")
+    p_audit.add_argument("--json", action="store_true")
+
+    p_spend = subparsers.add_parser(
+        "spend", help="Budget ledger: record/inspect session- and day-level token spend against a limit"
+    )
+    p_spend.add_argument("action", choices=["record", "status", "reset-session"])
+    p_spend.add_argument("--label", type=str, default=None, help="Required for 'record'")
+    p_spend.add_argument("--task-type", type=str, default=None)
+    p_spend.add_argument("--estimated-tokens", type=int, default=None, help="Required for 'record'")
+    p_spend.add_argument("--actual-tokens", type=int, default=None)
+    p_spend.add_argument(
+        "--budget-limit", type=int, default=None,
+        help="Token limit for the reported window; omit to report totals without an enforced limit",
+    )
+    p_spend.add_argument("--window", choices=["session", "daily", "all"], default="session")
+    p_spend.add_argument("--json", action="store_true")
+
+    p_snapshot = subparsers.add_parser(
+        "snapshot",
+        help="Git-based checkpoint/verify/rollback of working-tree changes "
+        "(distinct from the task-plan checkpoint shown by 'goldenboy status')",
+    )
+    p_snapshot.add_argument("action", choices=["create", "verify", "rollback", "list"])
+    p_snapshot.add_argument("--label", type=str, default="")
+    p_snapshot.add_argument(
+        "--check", dest="checks", action="append", default=[],
+        help="A command to run for 'verify' (repeatable, e.g. --check 'pytest tests/' --check mypy)",
+    )
+    p_snapshot.add_argument(
+        "--id", dest="snapshot_id", type=str, default=None,
+        help="Snapshot id for 'rollback' (default: latest)",
+    )
+    p_snapshot.add_argument(
+        "--rollback-on-fail", action="store_true",
+        help="With 'verify': automatically roll back to the latest snapshot if verification fails",
+    )
+    p_snapshot.add_argument("--repo-dir", type=str, default=".")
+    p_snapshot.add_argument("--json", action="store_true")
+
+    p_loop = subparsers.add_parser(
+        "loop",
+        help="Loop detection: record an attempt and check whether the same signature repeated too often",
+    )
+    p_loop.add_argument("action", choices=["record", "status", "reset"])
+    p_loop.add_argument("--tool", type=str, default=None, help="Required for 'record'")
+    p_loop.add_argument(
+        "--args", dest="args_summary", type=str, default="", help="Short summary of the arguments used"
+    )
+    p_loop.add_argument(
+        "--error", dest="error_summary", type=str, default="",
+        help="Short summary of the resulting error, if any",
+    )
+    p_loop.add_argument(
+        "--threshold", type=int, default=None, help="Override GoldenBoyConfig.loop_repeat_threshold"
+    )
+    p_loop.add_argument("--json", action="store_true")
+
+    p_failure = subparsers.add_parser(
+        "failure", help="Failure memory: record/list/resolve/find-similar past task failures"
+    )
+    p_failure.add_argument("action", choices=["record", "list", "resolve", "similar"])
+    p_failure.add_argument("--cause", type=str, default=None, help="Required for 'record' and 'similar'")
+    p_failure.add_argument("--task-type", dest="task_type", type=str, default=None)
+    p_failure.add_argument("--signature", type=str, default=None, help="Required for 'resolve'")
+    p_failure.add_argument("--resolution", type=str, default=None, help="Required for 'resolve'")
+    p_failure.add_argument(
+        "--min-similarity", type=float, default=0.4, help="Threshold for 'similar' (0.0-1.0)"
+    )
+    p_failure.add_argument("--json", action="store_true")
+
+    p_heartbeat = subparsers.add_parser(
+        "heartbeat",
+        help="Experimental: cheap local check for whether anything needs attention "
+        "(no LLM call, not a background daemon — see README.md)",
+    )
+    p_heartbeat.add_argument(
+        "--budget", type=float, default=None, help="Current remaining budget percentage, if known"
+    )
+    p_heartbeat.add_argument(
+        "--previous-budget", dest="previous_budget", type=float, default=None,
+        help="The remaining budget percentage as of the last check, to detect a change",
+    )
+    p_heartbeat.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -739,6 +1207,22 @@ def main():
             benchmark_cmd(args)
         elif args.command == "export":
             export_cmd(args)
+        elif args.command == "policy":
+            policy_cmd(args)
+        elif args.command == "route":
+            route_cmd(args)
+        elif args.command == "audit":
+            audit_cmd(args)
+        elif args.command == "spend":
+            spend_cmd(args)
+        elif args.command == "snapshot":
+            snapshot_cmd(args)
+        elif args.command == "loop":
+            loop_cmd(args)
+        elif args.command == "failure":
+            failure_cmd(args)
+        elif args.command == "heartbeat":
+            heartbeat_cmd(args)
         else:
             parser.print_help()
     except GoldenBoyError as e:

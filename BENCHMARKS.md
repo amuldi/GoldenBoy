@@ -9,7 +9,8 @@ these numbers for anything.
 ## What's measured (and what isn't)
 
 Measured: estimator latency and determinism, risk-assessment latency, CLI
-cold-start time — all local, no network calls.
+cold-start time, Policy Engine evaluation latency, Model Router latency,
+and Audit Log write latency — all local, no network calls.
 
 Not yet measured (Research in `ROADMAP.md`): anything involving a real
 provider API call (`refresh_usage()` latency depends entirely on network/API
@@ -24,6 +25,37 @@ separate from the one below: it takes tens of seconds to run (it builds
 synthetic repositories and multi-hundred-MB files on disk) rather than
 milliseconds, so it isn't part of the routine "run this before relying on
 these numbers" workflow this file documents.
+
+## 2026-09-18 — Apple M1 Pro, macOS (arm64), Python 3.13.7 (after the governance/runtime-safety upgrade)
+
+```
+Estimator.estimate_task() [warm, this repo]: mean=61.215ms median=60.542ms min=59.325ms max=72.096ms (n=20)
+Estimator.estimate_task() determinism: PASS (1 distinct result(s) across 10 identical calls)
+RiskEngine.assess(): mean=0.000ms median=0.000ms min=0.000ms max=0.011ms (n=1000)
+CLI cold start (`goldenboy status`): mean=143.746ms median=142.520ms min=140.823ms max=150.839ms (n=5)
+PolicyEngine.evaluate(): mean=0.007ms median=0.007ms min=0.007ms max=0.033ms (n=200)
+ModelRouter.route(): mean=0.002ms median=0.002ms min=0.001ms max=0.018ms (n=200)
+AuditStore.record() [local disk write]: mean=0.065ms median=0.056ms min=0.046ms max=0.938ms (n=200)
+```
+
+Three new measurements, added alongside the existing three (`goldenboy.core.benchmark.benchmark_policy_engine`/
+`benchmark_model_router`/`benchmark_audit_log_write`, wired into the same shared `run_all()` both
+`goldenboy benchmark` and `scripts/benchmark.py` already used): `PolicyEngine.evaluate()` and
+`ModelRouter.route()` are both pure in-memory logic over already-known inputs, so — like
+`RiskEngine.assess()` — they land in the sub-microsecond-to-low-microsecond range, not a bottleneck by
+construction. `AuditStore.record()` is the one new operation that touches disk (one JSONL line, `open`
++ `write` + implicit `flush`/`close` per call) and is still well under a tenth of a millisecond on
+average.
+
+`Estimator.estimate_task()` (61.2ms) and CLI cold start (143.7ms) both read higher than the 2026-09-17
+entry below (41.4ms / 119.1ms) on this same machine. Read honestly, not as a hidden regression claim:
+this file's own methodology note has always said "single machine, single run, no other load assumed
+controlled for" — this run was taken on a machine with several other processes active (editors, a
+background build), and neither `Estimator`/`RiskEngine`'s own code changed in this upgrade. `cli.py`
+does now construct 8 additional `argparse` subparsers on every invocation (one per new command), which is
+a plausible, real contributor to CLI-startup overhead — but it was not isolated via a controlled A/B
+measurement here, so it is named as a hypothesis, not asserted as the measured cause of the full ~25ms
+delta. Re-run `scripts/benchmark.py` yourself on a quiet machine before treating either number as precise.
 
 ## 2026-09-17 — Apple M1 Pro, macOS (arm64), Python 3.13.7 (after the context-relevance/complexity upgrade)
 

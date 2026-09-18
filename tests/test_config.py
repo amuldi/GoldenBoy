@@ -78,6 +78,8 @@ def test_bad_env_var_type_raises_configerror(tmp_path, monkeypatch):
         {"max_budget_tokens": -100},
         {"stale_after_seconds": 0.0},
         {"stale_after_seconds": -1.0},
+        {"loop_repeat_threshold": 0},
+        {"loop_repeat_threshold": -1},
     ],
 )
 def test_out_of_range_values_raise_configerror(kwargs):
@@ -95,6 +97,7 @@ def test_out_of_range_values_raise_configerror(kwargs):
         {"base_cost_per_unit": 0.0},
         {"max_budget_tokens": 1},
         {"stale_after_seconds": 0.01},
+        {"loop_repeat_threshold": 1},
     ],
 )
 def test_boundary_values_are_accepted(kwargs):

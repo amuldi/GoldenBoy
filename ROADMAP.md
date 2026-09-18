@@ -77,6 +77,20 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
 | `Estimator.estimate_task()`'s cost estimate is dominated by repo-context size, not prompt complexity, once the repo is moderately sized | **Done (2026-09-17)** — `Estimator._estimate_relevant_context` + `goldenboy.core.complexity` (see CHANGELOG.md). Re-running `scripts/validate_policy.py`'s exact 8-scenario budget curve went from a uniform ~66.4–66.5% every scenario (`benchmarks/results/2026-09-17-policy-validation-BEFORE-p0-fix.md`) to 5.0%–28.5%, correctly differentiated (`benchmarks/results/2026-09-17-policy-validation.md`). |
 | CI matrix is Ubuntu-only | Planned — the CLI/SDK subprocess-spawning contract is used cross-platform in practice; macOS/Windows aren't currently verified in CI. See `ARCHITECTURE_AUDIT.md` §8. Not changed in the 2026-09-17 upgrade — deferred, see that session's final report. |
 
+## Governance & runtime safety
+
+| Item | Status |
+|---|---|
+| Policy Engine (`goldenboy.core.governance`): code-enforced ALLOW/DENY/REQUIRE_APPROVAL over tool permission, budget, command-risk, and file-scope checks | Done (2026-09-18) — `goldenboy policy` CLI command; rules configurable via `.goldenboy/policy.json` |
+| Budget ledger (`goldenboy.core.spending`): session/day cumulative token spend tracking against an absolute token limit, distinct estimated-vs-actual accounting | Done (2026-09-18) — `goldenboy spend` CLI command |
+| Model Router (`goldenboy.core.router`): complexity + budget-risk -> provider-neutral tier, budget-only-downgrades | Done (2026-09-18) — `goldenboy route` CLI command; tier-to-model-name mapping is optional, user-supplied, empty by default |
+| Audit Log (`goldenboy.core.audit`): human-reviewable governance decision trail, secret-redacted | Done (2026-09-18) — `goldenboy audit` CLI command; wired automatically when `PolicyEngine` is given an `AuditStore` |
+| Checkpoint/rollback of working-tree changes (`goldenboy.core.snapshot`), git-based | Done (2026-09-18) — `goldenboy snapshot` CLI command. Known limitation: untracked-at-snapshot-time files are not restored/removed by rollback |
+| Loop detection (`goldenboy.core.loop_detection`) | Done (2026-09-18) — `goldenboy loop` CLI command; threshold via `GoldenBoyConfig.loop_repeat_threshold` (default 3) |
+| Failure memory (`goldenboy.core.failure_memory`), keyword-overlap similarity, no vector database | Done (2026-09-18) — `goldenboy failure` CLI command |
+| Heartbeat (`goldenboy.core.heartbeat`): cheap, local-only, no-LLM-call "does anything need attention" check | **Experimental** (2026-09-18) — `goldenboy heartbeat` CLI command. Explicitly not a background daemon/server; a reasonable starting check set, not a completeness guarantee. See README.md. |
+| Deep automatic wiring of the Policy Engine/Audit Log into `AdaptiveExecutor`/`budget_aware_execution` | Explicit non-goal for now — both remain independently composable (their own CLI command, their own Python API) rather than a new mandatory pipeline forced through already-stable, already-tested code. Revisit if real usage shows the composition burden is worth the coupling risk. |
+
 ## Explicit non-goals (for now)
 
 - Real task decomposition in `plan`/`run` (turning task text into
@@ -118,3 +132,11 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
   reimplements `Estimator`/`TaskClassifier`/`RiskEngine`/`DecisionEngine`
   rather than talking to the real Python CLI — evaluated and rejected in
   `ARCHITECTURE_AUDIT.md` §4/§9; `sdk/typescript` stays a thin client.
+- Any wallet, cryptocurrency (USDC or otherwise), x402/ERC-8004-style
+  payment or identity protocol, agent marketplace, agent-to-agent social
+  network, agent replication/spawning economy, self-funded AI business
+  model, or autonomous trading capability. None of these has any
+  connection to Golden Boy's stated purpose (controlling AI task cost and
+  execution behavior under explicit constraints) and none is implemented,
+  scaffolded, or planned — this line exists so that stays an explicit,
+  checkable statement rather than an assumption.

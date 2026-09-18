@@ -20,7 +20,7 @@ real, shrinking usage budget. That data only exists once Golden Boy (or
 something like it) has been run for real — which is exactly what
 `HistoryStore` (`.goldenboy/history.jsonl`) starts collecting from the
 first `budget_aware_execution` call. See `goldenboy/replay/engine.py`'s
-module docstring and [`goldenboy replay`](../README.md#-cli-reference)'s
+module docstring and [`goldenboy replay`](../README.md#cli-usage)'s
 honest `N/A` output on a fresh install.
 
 Where these datasets *are* directly useful: validating `TaskClassifier`
@@ -145,7 +145,7 @@ No dataset surveyed here is a drop-in substitute for Golden Boy's own
 event log. The correct, honest next step — already built — is
 `HistoryStore` collecting real local data from actual use, with
 `goldenboy.replay`/`goldenboy.analytics` reporting `N/A`/`NO_DATA` until
-enough of it exists (see [`goldenboy validate`](../README.md#-cli-reference)).
+enough of it exists (see [`goldenboy validate`](../README.md#cli-usage)).
 This document should be revisited once real historical data accumulates,
 to decide whether any of the above remain useful as an external
 cross-check rather than a primary data source.

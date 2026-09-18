@@ -7,195 +7,367 @@
 </p>
 
 <h1 align="center">Golden Boy</h1>
-<p align="center"><b>AI Agent Resource Intelligence — spend less of your AI budget on the wrong work.</b></p>
+<p align="center"><b>A budget-aware, policy-governed, verifiable runtime layer for AI coding agents.</b></p>
 
 <p align="center">
   <img src="https://github.com/amuldi/GoldenBoy/actions/workflows/ci.yml/badge.svg" alt="CI status">
   <img src="https://img.shields.io/badge/python-3.9--3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.9–3.13">
-  <img src="https://img.shields.io/badge/coverage-95%25-2ea44f?style=flat-square" alt="Coverage 95%">
+  <img src="https://img.shields.io/badge/coverage-94%25-2ea44f?style=flat-square" alt="Coverage 94%">
   <img src="https://img.shields.io/badge/dependencies-zero-2ea44f?style=flat-square" alt="Zero required dependencies">
   <img src="https://img.shields.io/badge/TypeScript_SDK-node_%3E%3D18-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript SDK, Node >= 18">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT license"></a>
 </p>
 
 <p align="center">
-  <a href="#-what-is-golden-boy">What is it</a> &nbsp;&middot;&nbsp;
-  <a href="#-real-world-example">Example</a> &nbsp;&middot;&nbsp;
-  <a href="#-key-capabilities">Capabilities</a> &nbsp;&middot;&nbsp;
-  <a href="#-how-it-works">How it works</a> &nbsp;&middot;&nbsp;
-  <a href="#-install">Install</a> &nbsp;&middot;&nbsp;
-  <a href="#-cli-reference">CLI</a> &nbsp;&middot;&nbsp;
-  <a href="#-protocol">Protocol</a> &nbsp;&middot;&nbsp;
-  <a href="#-typescript-sdk">TypeScript SDK</a> &nbsp;&middot;&nbsp;
-  <a href="#-replay-and-backtesting">Backtesting</a> &nbsp;&middot;&nbsp;
-  <a href="#-telemetry-and-calibration">Calibration</a> &nbsp;&middot;&nbsp;
-  <a href="#-validation">Validation</a> &nbsp;&middot;&nbsp;
-  <a href="#-roadmap">Roadmap</a> &nbsp;&middot;&nbsp;
-  <a href="#-contributing">Contributing</a>
+  <a href="#overview">Overview</a> &nbsp;&middot;&nbsp;
+  <a href="#why-golden-boy">Why</a> &nbsp;&middot;&nbsp;
+  <a href="#architecture">Architecture</a> &nbsp;&middot;&nbsp;
+  <a href="#policy-engine">Policy Engine</a> &nbsp;&middot;&nbsp;
+  <a href="#model-routing">Model Routing</a> &nbsp;&middot;&nbsp;
+  <a href="#checkpoint--recovery">Checkpoint &amp; Recovery</a> &nbsp;&middot;&nbsp;
+  <a href="#loop-detection">Loop Detection</a> &nbsp;&middot;&nbsp;
+  <a href="#auditability">Auditability</a> &nbsp;&middot;&nbsp;
+  <a href="#protocol--integrations">Protocol &amp; SDKs</a> &nbsp;&middot;&nbsp;
+  <a href="#installation">Install</a> &nbsp;&middot;&nbsp;
+  <a href="#cli-usage">CLI</a> &nbsp;&middot;&nbsp;
+  <a href="#limitations">Limitations</a> &nbsp;&middot;&nbsp;
+  <a href="#roadmap">Roadmap</a>
 </p>
 
-> **Latest update (2026-09-17, protocol `1.1.0`):** fixed the P0 finding from the 2026-09-15 architecture
-> audit — cost estimates were dominated by whole-repository size, not task size (the same ~66% for a typo
-> fix and a full re-architecture). `Estimator` now scores which repo files a task's own wording actually
-> points at (context relevance) and an independent, explainable complexity model, instead of scanning the
-> whole repo — measured before/after in `benchmarks/results/2026-09-17-policy-validation*.md`. Also new:
-> multi-label task classification, an execution-telemetry contract (`goldenboy report`), and estimate-vs-
-> actual calibration (`goldenboy calibrate`). Full evidence in [`CHANGELOG.md`](CHANGELOG.md).
+> **Latest update (2026-09-18):** Golden Boy grows from a task-estimation tool into a governance layer —
+> **Policy Engine**, a session/day **budget ledger**, a **Model Router**, an **Audit Log**, git-based
+> **checkpoint/rollback**, **loop detection**, and **failure memory**. All additive: every command, config
+> default, and public API that existed before this update behaves exactly as it did before. See
+> [Design Inspiration](#design-inspiration) for what this does and does not borrow from autonomous-agent
+> runtime research, and [`CHANGELOG.md`](CHANGELOG.md) for the full, itemized change list.
 
 ---
 
-## 💡 What is Golden Boy?
+## Overview
 
-AI coding agents tend to treat every task the same, regardless of how much usage is actually left. A large
-task started at 15% remaining budget often ends the same way: interrupted mid-edit, with no record of
-what was finished and what wasn't.
+AI coding agents are usually given a task and a lot of trust: run whatever commands you think you need,
+edit whatever files, keep going until you're done or the money runs out. That works until it doesn't — an
+agent runs a destructive command, edits a `.env` file, burns through a budget on one oversized task, retries
+the same failing test forever, or simply stops mid-edit with no record of what happened.
 
-**Golden Boy** is a decision layer that sits between an agent and its work: it figures out what *kind* of
-task this is, estimates what it will cost, checks that against remaining budget — *and how reliable that
-budget reading actually is* — and tells the agent how aggressively to proceed: run it, keep going, reduce
-scope, finish up and verify, or stop and checkpoint. Every recommendation ships with a confidence score and
-a reason built from the actual numbers computed for that call, in the same versioned JSON shape
-(the [Golden Boy Protocol](#-protocol)) whether you call it from Python, the CLI, or TypeScript.
+**Golden Boy** is a local, dependency-free runtime layer that sits between an agent and its own actions. It
+estimates what a task will cost *before* committing to it, checks that estimate against a real budget and
+policy rules, decides whether the action should even be allowed to run, routes it to an appropriately
+capable (not necessarily the most expensive) model tier, and — if the calling agent asks it to — checkpoints
+the working tree first so a bad change can be rolled back instead of merged.
 
 | | |
 |---|---|
-| ✅ **It does** | Classify the task, estimate its cost, track budget + confidence, decide an action (run/continue/reduce scope/finish/verify/stop/ask), checkpoint deferred work, record what happened locally, and let you backtest alternative policies against that history. |
-| 🚫 **It doesn't** | Decompose a task into a coding plan, replace the calling agent, act as a coding agent/IDE/LLM provider, or run a server. See [Design Principles](#-design-principles) and [About Task Breakdowns](#-about-task-breakdowns). |
+| ✅ **It does** | Classify a task, estimate its cost, track budget (as a percentage *and*, new in this update, as absolute session/day tokens), enforce policy (ALLOW / DENY / REQUIRE_APPROVAL) over tools/commands/paths/spend, route to a model tier, checkpoint and roll back working-tree changes via git, detect repeated failures, remember why past tasks failed, and log every governance decision to a local, human-readable audit trail. |
+| 🚫 **It doesn't** | Execute arbitrary coding work itself, decompose a task into a coding plan, replace the calling agent's judgment, run a server/daemon, use a database, call an LLM to make a policy decision, or implement anything resembling a wallet, cryptocurrency, agent marketplace, or agent-replication economy. See [Design Principles](#design-principles) and [Limitations](#limitations). |
 
 ---
 
-## 🧠 Real-World Example
+## Why Golden Boy?
+
+The instinct when making an agent more capable is to give it more autonomy: more tools, longer runs, less
+supervision. Golden Boy's premise is the opposite one — the thing worth building isn't *more autonomy*, it's
+**autonomy that stays inside explicit constraints**:
 
 ```
-User: "Refactor the authentication system and update tests."
+autonomy
+  + budget limits
+  + permission limits
+  + verification
+  + recovery
+  + auditability
 ```
 
-Every value below is real, live output from `goldenboy analyze` — not a mockup:
+Concretely, that means every one of the new capabilities in this update is a **hard, code-level check**, not
+a prompt asking an LLM to please behave: `PolicyEngine.evaluate()` returns `ALLOW`/`DENY`/`REQUIRE_APPROVAL`
+from deterministic rules over facts the caller already knows (the tool name, the command text, the file
+paths, the estimated cost, the running spend) — never a model call, and never merely a warning the agent is
+free to ignore.
+
+---
+
+## Core Concepts
+
+| Concept | What it answers | Module |
+|---|---|---|
+| **Task Analyzer** | What kind of task is this, and how complex does it look? | `goldenboy.core.task_classifier`, `goldenboy.core.complexity` |
+| **Budget Engine** | What will this cost, what's left, and is the estimate the same thing as the actual? | `goldenboy.core.estimator`, `goldenboy.core.budget`, `goldenboy.core.spending` |
+| **Policy Engine** | Is this specific action allowed to run at all? | `goldenboy.core.governance` |
+| **Model Router** | Given the task's complexity and the budget's risk level, which capability tier fits? | `goldenboy.core.router` |
+| **Checkpoint / Recovery** | If this change breaks something, can we get back to before it? | `goldenboy.core.checkpoint` (task-plan), `goldenboy.core.snapshot` (working tree, git-based) |
+| **Loop Detection** | Is the agent retrying the same failing thing forever? | `goldenboy.core.loop_detection` |
+| **Failure Memory** | Has something like this failed before, and how was it resolved? | `goldenboy.core.failure_memory` |
+| **Audit Log** | What actually happened, when, and why? | `goldenboy.core.audit` |
+
+Every row above is an independently usable Python class *and* a `goldenboy` CLI subcommand — see
+[CLI Usage](#cli-usage). None of them require the others to work.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["Task text"] --> B["Task Analyzer<br/>TaskClassifier + complexity model"]
+    A --> C["Estimator<br/>cost estimate (tokens + %)"]
+    B --> D["DecisionEngine<br/>RUN / CONTINUE / REDUCE_SCOPE / VERIFY / STOP / ASK_USER"]
+    C --> D
+    E[("Budget + Spending Ledger<br/>session / day token tracking")] --> D
+    D --> F{"Policy Engine<br/>permission → budget → risk → scope"}
+    F -- ALLOW --> G["Model Router<br/>complexity + risk → tier"]
+    F -- DENY --> H["Blocked"]
+    F -- REQUIRE_APPROVAL --> I["Held for human approval"]
+    G --> J["Agent executes the task<br/>(the calling agent's own code —<br/>Golden Boy does not execute work itself)"]
+    J --> K["Snapshot verify<br/>typecheck / test / build"]
+    K -- PASS --> L["Keep the change"]
+    K -- FAIL --> M["Snapshot rollback<br/>(git checkout to pre-change state)"]
+    J -- repeated failure --> N["Loop Detector"]
+    N -- threshold reached --> O["Stop + record in Failure Memory"]
+    F --> P[("Audit Log")]
+    K --> P
+    N --> P
+```
+
+This is the **recommended composition**, not something Golden Boy forces on its own: every box above is a
+real, independently tested module and CLI command, but nothing here automatically wires them together into
+one mandatory pipeline (see [Design Principles](#design-principles) for why — the short version is that
+`AdaptiveExecutor`/`budget_aware_execution` are already stable, already tested, and stayed unchanged;
+composing the new pieces is left to the caller, the same "wrap your own callable" shape those two already
+use). A minimal integration only needs the boxes it actually wants — e.g. just the Policy Engine, or just
+Snapshot verify/rollback.
+
+<details>
+<summary><b>How a risk mode (SAFE/CAUTION/LIMITED/CRITICAL) is decided</b></summary>
+
+```mermaid
+stateDiagram-v2
+    [*] --> SAFE: usable budget comfortably covers estimate
+    SAFE --> CAUTION: estimate ≥ caution_ratio × usable budget
+    CAUTION --> LIMITED: estimate exceeds usable budget
+    LIMITED --> CRITICAL: remaining budget at/below safety_margin
+    CAUTION --> SAFE: budget refreshed, ratio drops
+    LIMITED --> CAUTION: budget refreshed, fits again
+    CRITICAL --> LIMITED: budget refreshed, above safety_margin
+```
+
+Pre-existing, unchanged logic (`goldenboy.core.risk.RiskEngine`) — shown here because the Model Router and
+Policy Engine's budget check both build on it. A `STALE` or `UNKNOWN` usage reading can never quietly
+produce `SAFE`; see [How It Works](#how-it-works).
+
+</details>
+
+---
+
+## Budget-Aware Execution
+
+Golden Boy has always tracked *remaining* budget as a percentage (`Budget`/`RiskEngine`) and, since the
+2026-09-17 upgrade, distinguished *estimated* from *actual* cost per task
+(`goldenboy report` → `goldenboy calibrate`). This update adds a third layer: **cumulative spend tracking
+in absolute tokens**, scoped to a session or a calendar day, so a caller can enforce "no more than N tokens
+today" — something a per-check percentage alone can't express.
 
 ```bash
-$ goldenboy analyze "Refactor the authentication system and update tests" --budget 6
---- Golden Boy Analysis: 'Refactor the authentication system and update tests' ---
-Task type:        refactor (confidence: 0.47)
-Also detected:    testing, architecture_change
-Complexity:       LOW (0.20)
-Complexity signals: test_requirement_keyword, refactor_keyword
-Estimated cost:   29.42% (confidence: 0.85)
-Remaining usage:  6.00% (exact, source: mock)
-Risk:             LIMITED (ESTIMATED_COST_EXCEEDS_USABLE_BUDGET)
-Decision:         REDUCE_SCOPE (confidence: 0.77)
-Reason:           Task classified as refactor (LOW complexity, estimated cost 29.4% of budget, confidence 0.85). Remaining budget is 6.0% (exact via mock). Risk mode: LIMITED. Recommended action: REDUCE_SCOPE.
-Recommendation:
-  - Constrain remaining work to P0/P1 items.
-  - Explicitly defer P2-P4 items and say so.
+$ goldenboy spend record --label "Task A" --estimated-tokens 20000 --actual-tokens 17000 --budget-limit 100000 --window all
+Spending ledger (all) -- 1 entrie(s), 1 settled
+  Estimated (sum of all entries): 20,000 tokens
+  Actual (sum of settled entries): 17,000 tokens
+  Committed (actual where known, else estimated): 17,000 tokens
+  Budget limit: 100,000 tokens
+  Remaining: 83,000 tokens
+
+$ goldenboy spend record --label "Task B" --estimated-tokens 50000 --actual-tokens 56000 --budget-limit 100000 --window all
+Spending ledger (all) -- 2 entrie(s), 2 settled
+  Estimated (sum of all entries): 70,000 tokens
+  Actual (sum of settled entries): 73,000 tokens
+  Committed (actual where known, else estimated): 73,000 tokens
+  Budget limit: 100,000 tokens
+  Remaining: 27,000 tokens
 ```
 
-Nothing here is templated storytelling: the task type came from `TaskClassifier` actually scanning the
-prompt text, the cost from `Estimator` actually scoring which files in *this* repo the task text points at
-(not the whole repository — see [Key Capabilities](#-key-capabilities) below) plus the task's own complexity signals, and
-the risk mode from `RiskEngine` actually comparing that cost to the mock budget you passed in. Change the
-budget or the task text and every field changes with it — see [Protocol](#-protocol) for the exact JSON
-this produces with `--json`.
+That's the exact worked example from this project's own design brief, reproduced as real CLI output —
+`27,000` remaining after two tasks whose estimates (20,000 / 50,000) turned out different from their
+actuals (17,000 / 56,000). `LedgerSummary.committed_tokens` always uses the **actual** figure once one is
+known, and falls back to the **estimate** only as a provisional hold — the two are never displayed as if
+they were the same number. See [Cost Estimation](#cost-estimation) and [Budget Controls](#budget-controls).
 
 ---
 
-## ✨ Key Capabilities
+## Policy Engine
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>🧠 Task Intelligence</h3>
-      <div>
-        • 13-type classifier (bug fix, refactor, testing, architecture change, …), plus secondary types when more than one scores meaningfully<br>
-        • Deterministic + transparent — a heuristic match-strength score, never a fake calibrated probability<br>
-        • Complexity (LOW/MEDIUM/HIGH/VERY_HIGH) from an independent, explainable signal table — not back-computed from cost
-      </div>
-    </td>
-    <td width="50%" valign="top">
-      <h3>🚦 Explained Decisions</h3>
-      <div>
-        • <b>RUN · CONTINUE · REDUCE_SCOPE · FINISH · VERIFY · STOP · ASK_USER</b><br>
-        • Every decision ships a confidence score and a reason built from real numbers<br>
-        • Confidence too low to act on safely → <code>ASK_USER</code> instead of guessing
-      </div>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>🔋 Budget &amp; Confidence Tracking</h3>
-      <div>
-        • Remaining budget as a percentage, plus <b>EXACT / ESTIMATED / STALE / UNKNOWN</b> confidence<br>
-        • A <code>STALE</code> or <code>UNKNOWN</code> reading can never quietly present itself as <code>SAFE</code><br>
-        • Adapter staleness driven by an injectable clock — deterministic, no <code>sleep()</code> in tests
-      </div>
-    </td>
-    <td width="50%" valign="top">
-      <h3>💾 Checkpoint &amp; Resume</h3>
-      <div>
-        • Deferred work is saved, never silently dropped<br>
-        • <code>goldenboy resume</code> replays from the last checkpoint<br>
-        • Checkpoint schema is versioned — an incompatible future format fails cleanly
-      </div>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>📡 Local History &amp; Analytics</h3>
-      <div>
-        • Every decorated call appends one event locally — never raw task text<br>
-        • Real Dataset Quality report (rows, corrupted/duplicate/invalid ratios)<br>
-        • Cost/completion/failure-rate aggregates over your own real usage
-      </div>
-    </td>
-    <td width="50%" valign="top">
-      <h3>🔁 Replay &amp; Backtesting</h3>
-      <div>
-        • 5 baseline policies scored against real history: precision, recall, premature-stop rate<br>
-        • Walk-forward, leakage-safe chronological splitting<br>
-        • Honest <code>N/A</code> below 10 events — never a fabricated table
-      </div>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>🌐 Golden Boy Protocol</h3>
-      <div>
-        • One versioned, language-neutral JSON decision schema<br>
-        • Strict validation — a specific error, never a raw <code>KeyError</code><br>
-        • The same payload from Python, the CLI, and TypeScript
-      </div>
-    </td>
-    <td width="50%" valign="top">
-      <h3>🔌 Agent Integrations</h3>
-      <div>
-        • <code>budget_aware_execution</code> decorator wraps any Python callable<br>
-        • <code>AnthropicAdapter</code> / <code>OpenAIAdapter</code> read real rate-limit headers<br>
-        • A TypeScript SDK and a prompt-level <b>Claude Code</b> skill
-      </div>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>🎯 Context-Relevant Estimation</h3>
-      <div>
-        • Cost is scored from the repo context the task's own wording actually points at — not whole-repository size<br>
-        • A task matching nothing in the repo reports zero relevant context (and lower confidence), never a repo-sized guess<br>
-        • Repository size is still reported separately, for transparency, but no longer feeds the cost total
-      </div>
-    </td>
-    <td width="50%" valign="top">
-      <h3>📈 Telemetry &amp; Calibration</h3>
-      <div>
-        • <code>goldenboy report</code>: record what an external agent actually observed (tokens, tests, verification status)<br>
-        • <code>goldenboy calibrate</code>: MAE/RMSE/bias, estimated vs. actual, overall and per task type<br>
-        • Honest <code>N/A</code> below 10 recorded samples — same convention as Replay &amp; Backtesting
-      </div>
-    </td>
-  </tr>
-</table>
+```mermaid
+flowchart LR
+    R["ActionRequest<br/>(tool, command, paths, cost, spend-so-far)"] --> P["Permission<br/>check"]
+    P -->|tool denied| D1["DENY"]
+    P -->|tool needs approval| A1["REQUIRE_APPROVAL"]
+    P -->|pass| B["Budget<br/>check"]
+    B -->|session/day cap exceeded| D2["DENY"]
+    B -->|single action above threshold| A2["REQUIRE_APPROVAL"]
+    B -->|pass| RI["Risk<br/>check"]
+    RI -->|dangerous command pattern| D3["DENY"]
+    RI -->|approval-pattern command| A3["REQUIRE_APPROVAL"]
+    RI -->|pass| S["Scope<br/>check"]
+    S -->|protected path| D4["DENY"]
+    S -->|pass| ALLOW["ALLOW"]
+```
+
+Four checks, always in this order, first non-`ALLOW` wins — `goldenboy.core.governance.PolicyEngine`:
+
+```bash
+$ goldenboy policy bash --command "git push --force origin main" --estimated-cost-percentage 5
+Verdict: DENY
+Check:   risk
+Reason:  Command matches a denied pattern ('\bgit\s+push\s+(--force|-f)\b[^|;&]*\b(origin\s+)?(main|master)\b').
+Matched: \bgit\s+push\s+(--force|-f)\b[^|;&]*\b(origin\s+)?(main|master)\b
+
+$ goldenboy policy bash --command "sudo systemctl restart app"
+Verdict: REQUIRE_APPROVAL
+Check:   risk
+Reason:  Command matches a pattern requiring approval ('\bsudo\b').
+```
+
+`goldenboy policy` exits `0` on `ALLOW`, `1` on `DENY`, `2` on `REQUIRE_APPROVAL` — a calling script or agent
+harness can branch on the exit code directly, not just parse text. Rules (denied/approval tools, denied/
+approval command regex patterns, protected file-path globs, session/day cost caps, a single-action
+approval threshold) live in `PolicyConfig`, loaded from `.goldenboy/policy.json` via the same
+defaults → file → env-var cascade `GoldenBoyConfig` already uses — see [Configuration](#configuration).
+
+Protected paths are denied by default (`.env`, `**/credentials*`, `**/*.pem`, `**/id_rsa*`, `**/.ssh/**`,
+`**/.aws/**`, `**/.git/**`, …) — editing those requires an explicit policy override, not an agent's own
+judgment call. See [Agent Safety](#agent-safety).
 
 ---
 
-## 🔄 How It Works
+## Model Routing
+
+`goldenboy.core.router.ModelRouter` maps two signals — task complexity (reused from `DecisionEngine`,
+not reinvented) and budget risk (reused from `RiskEngine`) — to one of six **provider-neutral tiers**.
+Budget risk can only pull the tier *down*, never push it up:
+
+| Complexity → | Budget risk ↓ | Effective tier |
+|---|---|---|
+| any | `SAFE` | complexity's own tier (up to `HIGHEST`) |
+| any | `CAUTION` | capped at `HIGH` |
+| any | `LIMITED` | capped at `CHEAP` |
+| any | `CRITICAL` | forced to `STOP` |
+
+```bash
+$ goldenboy route "Re-architect the data model and migrate the storage layer" --budget 12
+--- Golden Boy Model Router: 'Re-architect the data model and migrate the storage layer' ---
+Complexity:   HIGH -> tier 'high'
+Budget risk:  CAUTION -> cap 'high'
+Routed tier:  HIGH
+Model:        (unconfigured — map tiers to real model names in .goldenboy/router.json)
+Reason:       Complexity HIGH routes to 'high' (budget risk CAUTION does not constrain it further).
+```
+
+Golden Boy ships **no real model names or pricing data** — mapping a tier to an actual model identifier is
+optional, caller-supplied config (`.goldenboy/router.json`'s `tier_models`). Unconfigured, `model_name` is
+`None`, never a guess, and the router has no dependency on any specific AI provider.
+
+---
+
+## Checkpoint & Recovery
+
+Two different, deliberately separately-named checkpoint systems exist — conflating them would have meant
+either breaking the existing one's established CLI vocabulary or silently changing what "checkpoint" means:
+
+| | `CheckpointManager` (pre-existing) | `SnapshotManager` (new) |
+|---|---|---|
+| Checkpoints | Golden Boy's own task-plan state (which `ExecutionUnit`s are done/deferred) | The working tree's file contents |
+| CLI | `goldenboy status` / `goldenboy resume` | `goldenboy snapshot create` / `verify` / `rollback` / `list` |
+| Storage | `.goldenboy/checkpoint.json` | git objects (`git stash create`) + `.goldenboy/snapshots.jsonl` |
+
+`SnapshotManager` uses **git itself**, not a second version-control system:
+
+```bash
+$ goldenboy snapshot create --label "before refactor"
+Snapshot 1a0b4572834 created (clean tree) at HEAD 0e35080f0696.
+
+$ echo "print('broken'" >> goldenboy/app.py   # a syntax error, for the example
+
+$ goldenboy snapshot verify --check "python3 -c \"import ast; ast.parse(open('goldenboy/app.py').read())\"" --rollback-on-fail
+Verification: FAIL
+  [FAIL] python3 -c "import ast; ast.parse(open('goldenboy/app.py').read())" (0.04s)
+Rolled back to snapshot 1a0b4572834.
+```
+
+`create()` records the current commit plus a `git stash create` object — this **touches nothing**: not the
+working tree, not the index, not the stash list (it's git's plumbing form, not `git stash push`). `verify()`
+runs whatever typecheck/test/build commands you give it, in order, stopping at the first failure — Golden
+Boy has no opinion on what "test" means for your project. `rollback()` restores tracked-file content via
+`git checkout <sha> -- .`, the least destructive form (moves no ref, touches only the working tree).
+
+**Known limitation, stated plainly:** a file that was *untracked* at snapshot time, or created *after* it,
+is not restored or removed by rollback — only tracked-file content is covered. See
+[Limitations](#limitations).
+
+---
+
+## Loop Detection
+
+An agent retrying the same failing action forever is a real, common failure mode. `LoopDetector` persists a
+count per `(tool, args, error)` signature across separate `goldenboy` invocations (the CLI itself is
+stateless per process, so this lives in `.goldenboy/loop_state.json`):
+
+```bash
+$ goldenboy loop record --tool pytest --args "test_login.py::test_expired_token" --error "AssertionError"
+Signature 0a2ab6a808414a42 (pytest): 1/3
+Continue: 1 of 3 allowed repeat(s) so far.
+
+$ goldenboy loop record --tool pytest --args "test_login.py::test_expired_token" --error "AssertionError"
+Signature 0a2ab6a808414a42 (pytest): 2/3
+Continue: 2 of 3 allowed repeat(s) so far.
+
+$ goldenboy loop record --tool pytest --args "test_login.py::test_expired_token" --error "AssertionError"
+Signature 0a2ab6a808414a42 (pytest): 3/3
+Stop retrying: the same (tool, args, error) signature has repeated 3 time(s), at or above the threshold of
+3. Save state and report the failure rather than retrying again.
+```
+
+The third call exits `1` — `should_stop` is `True`. Threshold is `GoldenBoyConfig.loop_repeat_threshold`
+(default `3`), the same range-validated, env-overridable config pattern every other threshold in this
+project uses. Only a hash of the signature is persisted, not the raw arguments/error text — same privacy
+convention as `HistoryStore.TaskEvent.prompt_hash`.
+
+A related, minimal module — `goldenboy.core.failure_memory` / `goldenboy failure` — records *why* a task
+failed (a normalized, hashed cause summary, so "line 42 failed" and "line 57 failed" count as the same
+underlying failure), so a later task can check "has this happened before" via keyword-overlap similarity —
+no vector database, no embeddings, per this project's "start simple" principle:
+
+```bash
+$ goldenboy failure similar --cause "connection timeout calling the billing API"
+[0.83] 3f1c9a2b1e4d5678  attempts=2  connection timeout while calling the payments API
+```
+
+---
+
+## Auditability
+
+Every Policy Engine decision, when given an `AuditStore`, is written to a local, human-readable,
+append-only log — `goldenboy.core.audit`:
+
+```bash
+$ goldenboy audit
+[11:46:45]
+ACTION: policy_check
+TOOL: bash
+POLICY: deny (DANGEROUS_COMMAND)
+ESTIMATED: 0 tokens
+RESULT: blocked
+```
+
+This is the exact block format from the project's own design brief. `error`/`extra` free-text fields pass
+through `goldenboy.core.redaction.redact_secrets` first — a pattern-based mask for common credential shapes
+(API keys, bearer tokens, `key=value` assignments) — before anything reaches disk; see
+[Agent Safety](#agent-safety) and [`SECURITY.md`](SECURITY.md). Nothing here is a placeholder: `goldenboy
+audit --json` returns the same structured entries a dashboard or log aggregator would ingest, today, from a
+fresh install with no setup beyond running `goldenboy policy ... --audit`.
+
+---
+
+## How It Works
+
+The pre-existing task-intelligence pipeline (unchanged by this update):
 
 ```
 Task text
@@ -219,153 +391,93 @@ Task text
                                      ▼
                      Decision (RUN / CONTINUE / REDUCE_SCOPE /
                         FINISH / VERIFY / STOP / ASK_USER)
-                                     │
-                                     ▼
-                    Record decision locally (HistoryStore)
-                                     │
-                                     ▼
-              External agent executes ──► goldenboy report (actual telemetry)
-                                     │
-                                     ▼
-        goldenboy calibrate (estimated vs. actual)  ·  goldenboy replay (backtest policies)
 ```
 
 | Mode | Meaning | Agent behavior |
 |---|---|---|
-| 🟢 `SAFE` | Comfortably above estimated cost | Execute P0–P4 normally |
-| 🟡 `CAUTION` | Sufficient, but the task is a large share of it | Keep going, but stay conservative and avoid opening new scope |
-| 🟠 `LIMITED` | Estimated cost exceeds usable budget | Constrain to P0/P1, tell the caller what's being skipped |
-| 🔴 `CRITICAL` | Budget already at/below its safety margin | Finish the current P0 unit, checkpoint, stop |
+| 🟢 `SAFE` | Comfortably above estimated cost | Execute normally |
+| 🟡 `CAUTION` | Sufficient, but a large share of budget | Keep going, avoid opening new scope |
+| 🟠 `LIMITED` | Estimated cost exceeds usable budget | Constrain to P0/P1, say what's skipped |
+| 🔴 `CRITICAL` | Budget already at/below its safety margin | Finish current unit, checkpoint, stop |
 
-The mode is decided by two ordered checks — is the budget already exhausted (below its `safety_margin`)
-→ `CRITICAL`; does the estimated cost exceed what's usable at all → `LIMITED` — and otherwise by the ratio
-of estimated cost to usable budget, split at a configurable `caution_ratio` (default `0.5`). A `STALE`
-budget reading is never allowed to produce a `SAFE` verdict — it's upgraded to at least `CAUTION`,
-regardless of how comfortable the raw numbers look; `DecisionEngine` applies the same conservative rule to
-`UNKNOWN`-confidence budgets (an adapter that's never been refreshed) as an explicit, separate policy on
-top of the unchanged `RiskEngine` — see [`goldenboy/core/risk.py`](goldenboy/core/risk.py) and
-[`goldenboy/core/decision_engine.py`](goldenboy/core/decision_engine.py).
+A `STALE` budget reading is never allowed to produce `SAFE` — it's upgraded to at least `CAUTION`;
+`DecisionEngine` applies the same conservative rule to `UNKNOWN`-confidence budgets. See
+[`goldenboy/core/risk.py`](goldenboy/core/risk.py) / [`goldenboy/core/decision_engine.py`](goldenboy/core/decision_engine.py).
 
 ---
 
-## ⚖️ Before vs. After
+## Protocol & Integrations
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <b>❌ Without Golden Boy</b>
-      <p>An agent receives "refactor the entire authentication system," starts immediately, spends
-      aggressively across exploration/implementation/tests, and gets interrupted mid-task when the budget
-      runs out — with no record of what's done.</p>
-    </td>
-    <td width="50%" valign="top">
-      <b>✅ With Golden Boy</b>
-      <p>The same request is classified, cost-estimated, and checked against budget <i>before</i> execution
-      scope is committed — a real decision with a real confidence score, not a guess made after the fact.
-      What actually happened is recorded locally, so the next similar task benefits from it.</p>
-    </td>
-  </tr>
-</table>
+Every decision Golden Boy produces — from Python, the CLI, or TypeScript — is one versioned,
+language-neutral JSON shape: the **Golden Boy Protocol** (unchanged by this update; full schema and
+versioning policy in [`docs/PROTOCOL.md`](docs/PROTOCOL.md)).
+
+```bash
+$ goldenboy analyze "Refactor the auth module" --budget 6 --json
+```
+```jsonc
+{
+  "schema_version": "1.1.0",
+  "task": { "task_type": "refactor", "complexity_label": "LOW", "estimated_cost_percentage": 5.0, "...": "..." },
+  "usage": { "remaining_percentage": 6.0, "confidence": "EXACT", "...": "..." },
+  "risk": { "mode": "LIMITED", "reason_code": "ESTIMATED_COST_EXCEEDS_USABLE_BUDGET" },
+  "action": "reduce_scope",
+  "confidence": 0.832,
+  "reason": "Task classified as refactor (LOW complexity, ...). Recommended action: REDUCE_SCOPE.",
+  "recommendation": ["Constrain remaining work to P0/P1 items.", "Explicitly defer P2-P4 items and say so."]
+}
+```
+
+```python
+from goldenboy import AdaptiveExecutor, MockProvider, budget_aware_execution, Priority
+
+provider = MockProvider(initial_percentage=40.0)
+
+@budget_aware_execution(provider, "1", "Refactor the auth module", Priority.P1)
+def refactor_auth():
+    ...  # your real work goes here — Golden Boy decides whether to call it at all
+```
+
+```ts
+import { GoldenBoyClient } from "@goldenboy/sdk";
+
+const client = new GoldenBoyClient(); // uses `goldenboy` from PATH — a thin client, not a reimplementation
+const decision = await client.analyze("Refactor the authentication system", { budget: 6 });
+console.log(decision.action, decision.confidence);
+```
+
+[`sdk/typescript`](sdk/typescript) spawns the real `goldenboy` CLI and validates its `--json` output through
+the same protocol contract — zero runtime dependencies of its own, 21 tests including real (non-mocked)
+integration tests against the actual CLI. Unchanged and re-verified passing against this update's build.
+
+| Provider | Reads | Notes |
+|---|---|---|
+| `MockProvider` | A synthetic, in-memory percentage | For demos and tests — no network calls. |
+| `AnthropicAdapter` | `anthropic-ratelimit-tokens-remaining` / `-limit` response headers | Requires `goldenboy[anthropic]`. Org-wide shared limit, not this call alone. |
+| `OpenAIAdapter` | `x-ratelimit-remaining-tokens` / `-limit-tokens` response headers | Requires `goldenboy[openai]`. Same shared-limit caveat. |
+| Claude Code skill | The `<total_tokens>` figure Claude Code injects into context | [`skills/goldenboy/SKILL.md`](skills/goldenboy/SKILL.md) — prompt-level, no Python process required. |
 
 ---
 
-## 🎬 Demo
+## History, Backtesting & Calibration
 
-A full arc — plan, then run adaptively against a shrinking budget, then diagnose the environment. Every
-line below is real output, captured from this repo (nothing staged or shortened):
+Every `budget_aware_execution`-decorated call appends one event to a local, append-only log
+(`.goldenboy/history.jsonl`) — never the task's raw text, only its length and a truncated hash.
+`goldenboy validate` reports a real Dataset Quality report (`NO_DATA` on a fresh install, honestly, not a
+fabricated baseline); `goldenboy replay` backtests five resource-allocation policies (two fixed-threshold
+baselines, complexity-only, usage-only, and `GoldenBoyPolicy` wrapping the real `RiskEngine`) against that
+history, reporting `N/A` below 10 events rather than inventing a table.
 
-<details>
-<summary><b>$ goldenboy plan "Refactor the entire authentication system" --budget 15</b></summary>
-
-```
---- Execution Plan: 'Refactor the entire authentication system' ---
-Remaining Budget: 15.00%
-Estimated Cost (heuristic, based on prompt + relevant repo context + expected output): 5.00% (confidence: 0.59)
-Risk Assessment: SAFE
-
-Example unit breakdown (illustrative, not derived from the task above):
-  [P0] Core feature implementation (Cost: 10.0%)
-  [P1] Critical integration tests (Cost: 8.0%)
-  [P2] Secondary cleanup (Cost: 5.0%)
-  [P3] Animations / visual polish (Cost: 4.0%)
-  [P4] Full documentation pass (Cost: 6.0%)
-```
-
-This repository has no `auth`/`authentication` module of its own, so `Estimator` correctly finds no
-relevant file-path evidence for this specific task text here — cost floors at 5% and confidence drops
-accordingly (see [Key Capabilities](#-key-capabilities)). The next command's `LIMITED` risk mode below comes from a
-*different*, unrelated estimate (`Estimator.estimate_plan()` costing the illustrative example units
-above, not this task's text — see the note in that command's own output).
-
-</details>
-
-<details>
-<summary><b>$ goldenboy -v run "Refactor the auth module" --budget 15</b></summary>
-
-```
-[goldenboy.executor] [Refactor the auth module] Budget: 15.00% | Risk: LIMITED
-[goldenboy.executor]   -> Executing: [P0] Core feature implementation
-[goldenboy.executor]   -> Executing: [P1] Critical integration tests
-[goldenboy.executor] Budget critically low. Triggering graceful stop.
-[goldenboy.executor] Saving checkpoint for deferred work.
-Starting Task: 'Refactor the auth module'
-Note: this uses the illustrative example plan (see 'goldenboy plan --help'); it does not decompose the task text above into real units.
-
---- Result ---
-Task 'Refactor the auth module' finished. Completed 1 units. Deferred 4 units.
-
-Deferred Work:
-  - [P1] Critical integration tests
-  - [P2] Secondary cleanup
-  - [P3] Animations / visual polish
-  - [P4] Full documentation pass
-```
-
-Budget dropped below the safety margin mid-run — the executor finished its current unit, checkpointed
-the rest, and stopped instead of continuing to spend.
-
-</details>
-
-<details>
-<summary><b>$ goldenboy validate</b> (fresh install, no history yet)</summary>
-
-```
---- Golden Boy Validate ---
-Config:     OK — safety_margin=3.0, caution_ratio=0.5, base_cost_per_unit=2.0, max_budget_tokens=100000, stale_after_seconds=300.0
-Checkpoint: OK — none present
-
-Dataset Quality
-Rows:                 0
-Status: NO_DATA — insufficient validated data (no history recorded yet).
-```
-
-No numbers are invented to fill in for data that doesn't exist yet — see [History & Analytics](#-history-and-analytics).
-
-</details>
-
-<details>
-<summary><b>$ goldenboy doctor</b></summary>
-
-```
---- Golden Boy Doctor ---
-Python: 3.13.7
-Optional dependency 'tiktoken': installed
-Optional dependency 'anthropic': installed
-  Anthropic API key: not configured (ANTHROPIC_API_KEY not set)
-Optional dependency 'openai': installed
-  OpenAI API key: not configured (OPENAI_API_KEY not set)
-Config: OK (safety_margin=3.0, caution_ratio=0.5, base_cost_per_unit=2.0, max_budget_tokens=100000, stale_after_seconds=300.0)
-Checkpoint: none present
-```
-
-API key presence is reported, never the value itself — every diagnostic command (`doctor`, `status`,
-`validate`) also supports `--json`.
-
-</details>
+`goldenboy report` closes the estimate → execute → observe loop: record what an external agent actually
+measured after acting on a `goldenboy analyze` decision, echoing back the estimate it's compared against.
+`goldenboy calibrate` then reports MAE/RMSE/bias between estimated and actual cost, overall and per task
+type — `N/A`, insufficient-data below 10 telemetry records, same honesty convention as `replay`. None of
+this is changed by this update; the new session/day spending ledger (see
+[Budget-Aware Execution](#budget-aware-execution)) is a separate, additive layer on top, not a replacement.
 
 ---
 
-## 🚀 Install
+## Installation
 
 ```bash
 pip install goldenboy
@@ -388,480 +500,263 @@ pip install "goldenboy[anthropic]"  # AnthropicAdapter
 pip install "goldenboy[openai]"     # OpenAIAdapter
 ```
 
-TypeScript agents/tools can use [`sdk/typescript`](sdk/typescript) instead of calling the CLI directly —
-see [TypeScript SDK](#-typescript-sdk).
+`goldenboy snapshot` additionally requires `git` on `PATH` (invoked via `subprocess`, never a shell string
+— see [`SECURITY.md`](SECURITY.md)); every other command works with the core install alone.
+
+TypeScript agents/tools can use [`sdk/typescript`](sdk/typescript) instead of calling the CLI directly.
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
 ```bash
-goldenboy analyze "Refactor the authentication system"   # full recommendation: type, risk, action, why
-goldenboy status                                          # current budget and any pending checkpoint
-goldenboy validate                                         # config + checkpoint + local data-quality report
-goldenboy doctor                                            # environment, config, and checkpoint diagnostics
+goldenboy analyze "Refactor the authentication system"     # full recommendation: type, risk, action, why
+goldenboy policy bash --command "rm -rf /"                 # code-enforced ALLOW/DENY/REQUIRE_APPROVAL
+goldenboy route "Refactor the authentication system"        # provider-neutral model tier
+goldenboy spend record --label "Task A" --estimated-tokens 20000 --budget-limit 100000
+goldenboy status                                             # current budget and any pending checkpoint
+goldenboy validate                                            # config + checkpoint + local data-quality report
+goldenboy doctor                                               # environment, config, and checkpoint diagnostics
 ```
 
 ---
 
-## 🖥 CLI Reference
+## CLI Usage
+
+**Task intelligence & budget (pre-existing):**
 
 | Command | Purpose |
 |---|---|
-| `goldenboy analyze <task>` | Full task-intelligence recommendation: type, complexity, risk, action, confidence, reason. `--progress 0.0-1.0`, `--json`. |
-| `goldenboy plan <task>` | Estimate a task's real cost from its text + the repo context actually relevant to it, and show the resulting risk mode. |
+| `goldenboy analyze <task>` | Full recommendation: type, complexity, risk, action, confidence, reason. `--progress`, `--json`. |
+| `goldenboy plan <task>` | Estimate a task's cost from its text + relevant repo context, show the risk mode. |
 | `goldenboy run <task>` | Execute a budget-aware demo plan adaptively against a mock budget. |
-| `goldenboy status` | Inspect current budget and any pending checkpoint. `--json`. |
-| `goldenboy resume` | Resume execution from the previous checkpoint. |
-| `goldenboy doctor` | Diagnose Python version, optional dependencies, provider key configuration, config, checkpoint. `--json`. |
+| `goldenboy status` | Inspect current budget and any pending task-plan checkpoint. `--json`. |
+| `goldenboy resume` | Resume execution from the previous task-plan checkpoint. |
+| `goldenboy doctor` | Diagnose Python version, optional deps, provider keys, config, checkpoint. `--json`. |
 | `goldenboy validate` | Validate config + checkpoint + local history data quality; exits 1 on a real problem. `--json`. |
 | `goldenboy replay` | Backtest baseline policies against local (or `--dataset PATH`) history. `--json`. |
-| `goldenboy benchmark` | Measure estimator/risk-engine/CLI-startup latency, on this machine, now. `--json`. |
-| `goldenboy report` | Record actual execution telemetry for a task Golden Boy previously analyzed. `--outcome` (required) plus optional fields, or `--json-file PATH`. |
-| `goldenboy calibrate` | Compare estimated vs. actual cost (MAE/RMSE/bias) over recorded telemetry. `--dataset PATH`, `--json`. |
-| `goldenboy export` | Export config + checkpoint + history as one reproducible JSON document. `--output PATH`. |
+| `goldenboy report` | Record actual execution telemetry for a task previously analyzed. `--outcome` + optional fields, or `--json-file`. |
+| `goldenboy calibrate` | Compare estimated vs. actual cost (MAE/RMSE/bias) over recorded telemetry. `--dataset`, `--json`. |
+| `goldenboy benchmark` | Measure estimator/risk/policy/router/audit/CLI-startup latency, now, on this machine. `--json`. |
+| `goldenboy export` | Export config + checkpoint + history as one reproducible JSON document. `--output`. |
+
+**Governance & runtime safety (new in this update):**
+
+| Command | Purpose |
+|---|---|
+| `goldenboy policy <tool>` | Evaluate one action: `ALLOW`(exit 0) / `DENY`(exit 1) / `REQUIRE_APPROVAL`(exit 2). `--command`, `--path` (repeatable), `--estimated-cost-percentage`, `--session-calls`, `--session-spent-percentage`, `--day-spent-percentage`, `--policy-file`, `--audit`, `--json`. |
+| `goldenboy route <task>` | Map task complexity + budget risk to a provider-neutral model tier. `--budget`, `--router-file`, `--json`. |
+| `goldenboy audit` | Show recent Audit Log entries. `--limit`, `--json`. |
+| `goldenboy spend <action>` | `record` / `status` / `reset-session` — session/day token-spend ledger. `--label`, `--estimated-tokens`, `--actual-tokens`, `--budget-limit`, `--window {session,daily,all}`, `--json`. |
+| `goldenboy snapshot <action>` | `create` / `verify` / `rollback` / `list` — git-based working-tree checkpoint. `--label`, `--check` (repeatable), `--rollback-on-fail`, `--id`, `--json`. |
+| `goldenboy loop <action>` | `record` / `status` / `reset` — repeated-failure detection. `--tool`, `--args`, `--error`, `--threshold`, `--json`. |
+| `goldenboy failure <action>` | `record` / `list` / `resolve` / `similar` — minimal failure memory. `--cause`, `--task-type`, `--signature`, `--resolution`, `--min-similarity`, `--json`. |
+| `goldenboy heartbeat` | **Experimental.** Cheap, local-only "does anything need attention" check. `--budget`, `--previous-budget`, `--json`. |
 
 Add `--budget` to any mock-budget command to control the starting budget, and `-v`/`--verbose` (before the
-subcommand) for the internal per-unit decision log shown in the [Demo](#-demo) above.
+subcommand) for the internal per-unit decision log.
 
 ---
 
-## 🐍 Python Integration
+## Configuration
 
-```python
-from goldenboy import AdaptiveExecutor, MockProvider, budget_aware_execution, Priority
+Every policy threshold lives in a config dataclass, with the same override order throughout:
 
-provider = MockProvider(initial_percentage=40.0)
-
-@budget_aware_execution(provider, "1", "Refactor the auth module", Priority.P1)
-def refactor_auth():
-    ...  # your real work goes here — Golden Boy decides whether to call it at all
-
-refactor_auth()
+```
+explicit constructor arg  >  GOLDENBOY_* environment variable  >  .goldenboy/*.json file  >  default
 ```
 
-`budget_aware_execution` asks the provider for a budget/mode decision and, only if the mode allows it,
-calls your function — never the provider itself. Every call also records one event locally (never the raw
-task text) — see [History & Analytics](#-history-and-analytics). The full public surface lives in
-[`goldenboy/__init__.py`](goldenboy/__init__.py); anything not listed there is reachable via its own
-submodule but isn't part of the stability contract the top-level API is.
+**`GoldenBoyConfig`** (`.goldenboy/config.json`):
 
-For the full explained-decision API, use `DecisionEngine` directly:
+| Field | Env var | Default | Meaning |
+|---|---|---|---|
+| `safety_margin` | `GOLDENBOY_SAFETY_MARGIN` | `3.0` | Percentage points reserved below remaining budget before it counts as exhausted. |
+| `caution_ratio` | `GOLDENBOY_CAUTION_RATIO` | `0.5` | Estimated-cost/usable-budget ratio at which risk moves from SAFE to CAUTION. |
+| `base_cost_per_unit` | `GOLDENBOY_BASE_COST_PER_UNIT` | `2.0` | Fallback per-unit cost when a plan's units don't declare one. |
+| `max_budget_tokens` | `GOLDENBOY_MAX_BUDGET_TOKENS` | `100000` | Token count treated as "100% of budget" for percentage conversion. |
+| `stale_after_seconds` | `GOLDENBOY_STALE_AFTER_SECONDS` | `300.0` | How long a refreshed provider reading stays `ESTIMATED` before aging to `STALE`. |
+| `loop_repeat_threshold` | `GOLDENBOY_LOOP_REPEAT_THRESHOLD` | `3` | Repeats of the same signature before `LoopDetector` recommends stopping. |
 
-```python
-from goldenboy.adapters.mock import MockProvider
-from goldenboy.core.decision_engine import DecisionEngine
+**`PolicyConfig`** (`.goldenboy/policy.json`, list fields are wholesale-replaced by a file, not merged):
 
-decision = DecisionEngine().decide("Refactor the auth module", MockProvider(initial_percentage=15))
-print(decision.action, decision.confidence, decision.reason)
-```
+| Field | Default |
+|---|---|
+| `denied_tools` / `approval_required_tools` | `[]` / `[]` |
+| `denied_command_patterns` | `rm -rf /`, fork bombs, `DROP TABLE`/`DATABASE`, `chmod -R 777 /`, `git push --force` to `main`/`master`, `git branch -D main/master`, … |
+| `approval_command_patterns` | `git push`, `git reset --hard`, `git clean -f`, `npm publish`, `sudo`, `pip install --upgrade`, `curl \| sh`, … |
+| `protected_path_patterns` | `.env*`, `**/credentials*`, `**/*secret*`, `**/*.pem`, `**/id_rsa*`, `**/.ssh/**`, `**/.aws/**`, `**/.git/**` |
+| `max_calls_per_session_per_tool` | `50` |
+| `session_budget_limit_percentage` / `day_budget_limit_percentage` | `None` (disabled) |
+| `max_single_action_cost_percentage` | `40.0` |
+
+**`RouterConfig`** (`.goldenboy/router.json`): `tier_models` — an optional `{tier: real-model-name}`
+mapping, empty by default (see [Model Routing](#model-routing)).
+
+Out-of-range values, malformed JSON, invalid regex patterns, and unparseable `GOLDENBOY_*` env vars all
+raise a clear, typed error — never a stack trace.
 
 ---
 
-## 🌐 Protocol
+## Examples
 
-Every decision Golden Boy produces — from Python, the CLI, or TypeScript — is one versioned,
-language-neutral JSON shape: the **Golden Boy Protocol**. Full schema, versioning policy, and why there's
-no server in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+A full arc: analyze, then govern with policy, then route, then checkpoint-verify-rollback:
 
-```bash
-goldenboy analyze "Refactor the auth module" --budget 6 --json
+<details>
+<summary><b>$ goldenboy analyze "Refactor the authentication system and update tests" --budget 6</b></summary>
+
+```
+--- Golden Boy Analysis: 'Refactor the authentication system and update tests' ---
+Task type:        refactor (confidence: 0.47)
+Also detected:    testing, architecture_change
+Complexity:       LOW (0.20)
+Complexity signals: test_requirement_keyword, refactor_keyword
+Estimated cost:   29.42% (confidence: 0.85)
+Remaining usage:  6.00% (exact, source: mock)
+Risk:             LIMITED (ESTIMATED_COST_EXCEEDS_USABLE_BUDGET)
+Decision:         REDUCE_SCOPE (confidence: 0.77)
+Reason:           Task classified as refactor (LOW complexity, estimated cost 29.4% of budget, confidence 0.85). Remaining budget is 6.0% (exact via mock). Risk mode: LIMITED. Recommended action: REDUCE_SCOPE.
+Recommendation:
+  - Constrain remaining work to P0/P1 items.
+  - Explicitly defer P2-P4 items and say so.
 ```
 
-```jsonc
-{
-  "schema_version": "1.1.0",
-  "task": {
-    "task_type": "refactor", "complexity_label": "LOW", "estimated_cost_percentage": 5.0,
-    "secondary_task_types": [], "complexity_signals": ["refactor_keyword"], "...": "..."
-  },
-  "usage": { "remaining_percentage": 6.0, "confidence": "EXACT", "...": "..." },
-  "risk": { "mode": "LIMITED", "reason_code": "ESTIMATED_COST_EXCEEDS_USABLE_BUDGET" },
-  "action": "reduce_scope",
-  "confidence": 0.832,
-  "reason": "Task classified as refactor (LOW complexity, ...). Recommended action: REDUCE_SCOPE.",
-  "recommendation": ["Constrain remaining work to P0/P1 items.", "Explicitly defer P2-P4 items and say so."]
-}
+</details>
+
+<details>
+<summary><b>$ goldenboy heartbeat --budget 2 --previous-budget 20</b> (experimental)</summary>
+
+```
+Should wake: True
+  - Budget is exhausted (at or below its safety margin).
+  - Budget changed since last check: 20.0% -> 2.0%.
+  - Loop detection recorded 1 signature(s) at/above threshold (tool(s): pytest).
 ```
 
-`goldenboy/protocol.py`'s `GoldenBoyDecision.from_dict`/`from_json` strictly validate any payload built
-this way — a missing field or an incompatible major schema version raises `ProtocolError`, never a raw
-`KeyError`. `sdk/typescript/src/validate.ts` enforces the identical contract on the TypeScript side.
+Three cheap, local, no-LLM-call checks combined into one answer — see [Limitations](#limitations) for what
+this is and isn't a guarantee of.
+
+</details>
+
+<details>
+<summary><b>$ goldenboy validate</b> (fresh install, no history yet)</summary>
+
+```
+--- Golden Boy Validate ---
+Config:     OK — safety_margin=3.0, caution_ratio=0.5, base_cost_per_unit=2.0, max_budget_tokens=100000, stale_after_seconds=300.0
+Checkpoint: OK — none present
+
+Dataset Quality
+Rows:                 0
+Status: NO_DATA — insufficient validated data (no history recorded yet).
+```
+
+No numbers are invented to fill in for data that doesn't exist yet.
+
+</details>
 
 ---
 
-## 📘 TypeScript SDK
+## Cost Estimation
 
-[`sdk/typescript`](sdk/typescript) is a thin client, not a second implementation — it spawns the real
-`goldenboy` CLI and parses its `--json` output through the same protocol validation described above. Zero
-runtime dependencies; tests run on Node's built-in test runner, including real (non-mocked) integration
-tests against the actual CLI.
-
-```ts
-import { GoldenBoyClient } from "@goldenboy/sdk";
-
-const client = new GoldenBoyClient(); // uses `goldenboy` from PATH
-const decision = await client.analyze("Refactor the authentication system", { budget: 6 });
-
-console.log(decision.action);       // "reduce_scope"
-console.log(decision.confidence);   // 0.774
-console.log(decision.reason);       // built from the same real numbers as the Python/CLI output
-```
-
-```bash
-cd sdk/typescript
-npm install && npm run build && npm test   # 14 tests, including live CLI integration
-```
-
-See [`sdk/typescript/README.md`](sdk/typescript/README.md) for the full API and design notes.
+`Estimator.estimate_task()` scores four independent terms — relevant repo context (which files the task's
+*own wording* points at, not whole-repository size), prompt tokens, expected output tokens (scaled by an
+independent complexity signal), and verification overhead — into one percentage, with a reported confidence
+that drops when there's no file-path evidence to ground the estimate. Full mechanism, weights, and the P0
+accuracy fix that decoupled this from repo size: [`ARCHITECTURE_AUDIT.md`](ARCHITECTURE_AUDIT.md) §7 and
+`CHANGELOG.md`'s 2026-09-17 entry. This update does not change `Estimator` itself — it adds the session/day
+**ledger** on top (see [Budget-Aware Execution](#budget-aware-execution)) and the **estimated vs. actual**
+distinction that ledger enforces everywhere it's displayed.
 
 ---
 
-## 📡 History and Analytics
+## Budget Controls
 
-Every `budget_aware_execution`-decorated call appends one event to a local, append-only log
-(`.goldenboy/history.jsonl`, gitignored — same convention as the checkpoint file). An event never stores
-the task's raw text, only its length and a truncated SHA-256 hash (see
-[`goldenboy/core/history.py`](goldenboy/core/history.py) and [`SECURITY.md`](SECURITY.md)).
+Budget is enforced, not just displayed, at two layers:
 
-```bash
-goldenboy validate   # Dataset Quality: rows, corrupted/duplicate/invalid-value ratios, GOOD/ACCEPTABLE/POOR/NO_DATA
-goldenboy export     # config + checkpoint + history (quality report, analytics, events) as one JSON document
-```
+1. **Per-request** (`RiskEngine`, unchanged): does *this* estimated cost fit the *current* usable budget?
+2. **Cumulative** (new — Policy Engine's budget check + the spending ledger): does this request, added to
+   what's already been spent this session/day, stay under an explicit cap? `goldenboy spend` enforces the
+   cap directly (`over_limit` → exit `1`); `goldenboy policy`'s budget check enforces the same idea per
+   action, plus a hard per-tool session call limit and a soft single-action-cost approval threshold.
 
-```python
-from goldenboy.analytics import data_quality
-from goldenboy.analytics.engine import analyze
-from goldenboy.core.history import HistoryStore
-
-store = HistoryStore()
-print(data_quality.validate(store).render())   # a real report -- "NO_DATA" if nothing's recorded yet
-print(analyze(store).render())                  # cost/completion/failure-rate aggregates, or "N/A"
-```
-
-On a fresh install both report zero rows honestly — see the [Demo](#-demo)'s `validate` example above.
-Nothing here is a placeholder waiting to be "unlocked": it's real, working code that starts producing real
-aggregates the moment your agent actually runs decorated tasks.
+No silent degradation: a request that doesn't fit is `DENY`d or flagged `REQUIRE_APPROVAL`, never quietly
+allowed through with an inflated confidence.
 
 ---
 
-## 🔁 Replay and Backtesting
+## Agent Safety
 
-`goldenboy.replay` answers one question: *would a different resource-allocation policy have made better
-decisions on these actual past tasks?* This is an **AI agent resource-allocation backtest**, not a
-financial one. Five policies are compared on identical footing — two fixed-threshold baselines (15%/20%),
-a complexity-only heuristic, a usage-only heuristic, and `GoldenBoyPolicy` (which wraps the real,
-unmodified `RiskEngine`) — via `goldenboy.core.policies` and `goldenboy.replay.engine`.
+The Policy Engine's **scope** check exists specifically so an agent's own judgment isn't the only thing
+standing between it and a `.env` file, an SSH key, or `.git/` internals — those paths are denied by default,
+not left to a prompt instruction. The **risk** check does the same for shell commands: `rm -rf /`, fork
+bombs, `DROP TABLE`, `chmod -R 777 /`, and force-pushing `main`/`master` are denied outright; `sudo`,
+`git push`, `git reset --hard`, and `npm publish` require approval. Combined with **loop detection** (stop
+retrying, don't spin forever) and **snapshot rollback** (a bad change is reversible, not merged by default),
+the safety story is: an agent can be wrong, and the blast radius of being wrong stays bounded.
 
-```bash
-$ goldenboy replay
-Backtest: 0 event(s) available (need at least 10).
-N/A — insufficient validated data.
-```
-
-That's the real, current output on a fresh install — and it's supposed to be. There is no bundled or
-synthetic dataset standing in for real usage; `docs/DATASETS.md` documents why public benchmarks like
-SWE-bench don't substitute for it (they measure code-generation correctness, not budget-aware resource
-decisions). Once your own `.goldenboy/history.jsonl` has at least 10 events, `goldenboy replay` scores
-every policy for real:
-
-```
-Policy                        Precision     Recall   Accuracy  PrematureStop  UnnecessaryContinue
----------------------------------------------------------------------------------------------------
-fixed_threshold_15pct            ...           ...       ...          ...              ...
-golden_boy_risk_engine           ...           ...       ...          ...              ...
-
-Limitations:
-  - Off-policy evaluation from logged outcomes: an event's recorded outcome reflects the decision
-    Golden Boy actually made at the time, not the alternate policy being scored here. This is a
-    descriptive comparison on existing data, not a causal guarantee of future behavior.
-  - ...
-```
-
-`walk_forward_folds()` chronologically partitions events with no leakage across fold boundaries — tested,
-ready infrastructure for a future learned policy (today's five policies are all fixed/deterministic, so
-folding doesn't change their scores yet; see `goldenboy/replay/engine.py`'s module docstring). The report
-always prints its own methodology limitations alongside any numbers — see
-[`goldenboy/replay/engine.py`](goldenboy/replay/engine.py).
+None of this replaces human review for anything genuinely consequential — `REQUIRE_APPROVAL` exists
+precisely to keep a human in that loop, not to simulate one.
 
 ---
 
-## 📈 Telemetry and Calibration
-
-Golden Boy estimates a cost *before* work happens; it has no way to observe what actually happened
-afterward unless something tells it. `goldenboy report` is that contract — record what an external agent
-(you, or whatever executed the task) actually measured, echoing back the estimate it was compared against:
-
-```bash
-$ goldenboy report --outcome completed --task-type bug_fix \
-    --estimated-cost-percentage 8.0 --actual-total-tokens 9000
-Recorded telemetry: outcome=completed, actual_cost=9.00%
-```
-
-Only `--outcome` is required — every other field (`--verification-status`, `--tests-run`/`--tests-passed`,
-`--files-touched`, `--duration-seconds`, …) is optional, and none of them ever include your prompt or code;
-see [`goldenboy/core/telemetry.py`](goldenboy/core/telemetry.py) for the full field contract and
-[`skills/goldenboy/SKILL.md`](skills/goldenboy/SKILL.md) for the verification-status vocabulary
-(`VERIFIED`/`PARTIALLY_VERIFIED`/`UNVERIFIED`/`FAILED`) that distinguishes a *claimed* outcome from a
-*verified* one.
-
-Once at least 10 telemetry records exist, `goldenboy calibrate` compares estimated against actual cost —
-same honest floor as `goldenboy replay`:
-
-```bash
-$ goldenboy calibrate
-Calibration (estimated vs. actual cost percentage): n=0 (need >= 10) -- N/A, insufficient data
-```
-
-That's real output on a fresh install (zero recorded telemetry is the honest starting state — see
-[Limitations](#-limitations)). With real data, it reports MAE, RMSE, median absolute error, bias
-(`mean(actual - estimated)`; positive means Golden Boy underestimates on average), and over-/under-
-estimation rates, both overall and broken out per task type — see
-[`goldenboy/core/calibration.py`](goldenboy/core/calibration.py).
-
----
-
-## 🔌 Integrations
-
-Provider adapters report usage; they never execute your code. Real work always runs through the
-`budget_aware_execution` decorator above.
-
-| Provider | Reads | Notes |
-|---|---|---|
-| `MockProvider` | A synthetic, in-memory percentage | For demos and tests — no network calls. |
-| `AnthropicAdapter` | `anthropic-ratelimit-tokens-remaining` / `-limit` response headers | Requires `goldenboy[anthropic]`. Reflects the org's *shared* rate limit, not this call alone. |
-| `OpenAIAdapter` | `x-ratelimit-remaining-tokens` / `-limit-tokens` response headers | Requires `goldenboy[openai]`. Same shared-limit caveat as above. |
-| Claude Code skill | The `<total_tokens>` figure Claude Code injects into context | No Python process required — see below. |
-| TypeScript SDK | The `goldenboy` CLI's `--json` output over a spawned process | No HTTP server — see [Protocol](#-protocol). |
-
-```python
-from goldenboy.adapters.anthropic_adapter import AnthropicAdapter
-from goldenboy.integration import budget_aware_execution
-from goldenboy.core.priorities import Priority
-
-adapter = AnthropicAdapter()
-adapter.refresh_usage()
-
-@budget_aware_execution(adapter, "1", "Refactor auth module", Priority.P1)
-def refactor_auth():
-    ...
-```
-
-Both adapters only update their reading via an explicit `refresh_usage()` call, and track how long ago
-that happened using an injectable clock — past `stale_after_seconds` (default 300s), confidence ages from
-`ESTIMATED` to `STALE` on its own. Before the first refresh, confidence is `UNKNOWN` —
-`DecisionEngine` (not `RiskEngine` itself) treats that conservatively too, the same way it treats `STALE`.
-
-**Claude Code** gets a prompt-level integration instead:
-[`skills/goldenboy/SKILL.md`](skills/goldenboy/SKILL.md) teaches an LLM agent to read the remaining-usage
-figure Claude Code injects directly into context and reason about its own execution mode, with the exact
-same `SAFE`/`CAUTION`/`LIMITED`/`CRITICAL` vocabulary as `goldenboy.core.risk.ExecutionMode` — kept in
-sync by hand, not shared code, since one side is Python and the other is a prompt.
-
----
-
-## 🏗 Architecture
+## Project Structure
 
 <details>
 <summary><b>Click to expand the package tree</b></summary>
 
 ```
 goldenboy/
-├── __init__.py            # small, deliberate public API
-├── cli.py                  # status / plan / run / resume / doctor / analyze / validate / replay / benchmark / export
-├── protocol.py              # the Golden Boy Protocol -- GoldenBoyDecision schema + validation
-├── integration.py           # budget_aware_execution decorator + history recording
+├── __init__.py              # small, deliberate public API
+├── cli.py                    # 20 subcommands — see CLI Usage above
+├── protocol.py                 # the Golden Boy Protocol -- GoldenBoyDecision schema + validation
+├── integration.py               # budget_aware_execution decorator + history recording
 ├── adapters/
-│   ├── base.py               # ProviderAdapter interface + shared staleness logic
-│   ├── mock.py                # synthetic provider for demos/tests
+│   ├── base.py                    # ProviderAdapter interface + shared staleness logic
+│   ├── mock.py                     # synthetic provider for demos/tests
 │   ├── anthropic_adapter.py
 │   └── openai_adapter.py
 ├── core/
-│   ├── budget.py               # Budget, UsageConfidence
-│   ├── estimator.py            # task cost estimation
-│   ├── risk.py                  # RiskEngine → ExecutionMode
-│   ├── executor.py              # AdaptiveExecutor
-│   ├── checkpoint.py            # CheckpointManager
-│   ├── config.py                 # GoldenBoyConfig
-│   ├── priorities.py             # Priority, ExecutionUnit
-│   ├── task_types.py             # TaskType, DecisionAction vocabularies
-│   ├── task_classifier.py         # TaskClassifier -- deterministic keyword classification
-│   ├── decision_engine.py         # DecisionEngine -- the full explained GoldenBoyDecision
-│   ├── history.py                  # HistoryStore, TaskEvent -- local event log
-│   ├── policies.py                  # baseline policies + GoldenBoyPolicy, for replay
-│   ├── benchmark.py                  # shared benchmark implementation (CLI + scripts/benchmark.py)
-│   └── errors.py                      # GoldenBoyError, ConfigError, CheckpointError
+│   ├── budget.py                     # Budget, UsageConfidence
+│   ├── estimator.py                   # task cost estimation
+│   ├── risk.py                         # RiskEngine → ExecutionMode
+│   ├── executor.py                     # AdaptiveExecutor
+│   ├── checkpoint.py                    # CheckpointManager (task-plan checkpoint)
+│   ├── config.py                         # GoldenBoyConfig
+│   ├── priorities.py                      # Priority, ExecutionUnit
+│   ├── task_types.py                       # TaskType, DecisionAction vocabularies
+│   ├── task_classifier.py                   # TaskClassifier -- deterministic keyword classification
+│   ├── complexity.py                         # independent task-complexity signal model
+│   ├── decision_engine.py                     # DecisionEngine -- the full explained GoldenBoyDecision
+│   ├── history.py                              # HistoryStore, TaskEvent -- local event log
+│   ├── telemetry.py                             # ExecutionTelemetry, TelemetryStore
+│   ├── calibration.py                            # estimated-vs-actual MAE/RMSE/bias
+│   ├── policies.py                                # baseline policies + GoldenBoyPolicy, for replay
+│   ├── governance.py            # NEW — Policy Engine (ALLOW/DENY/REQUIRE_APPROVAL)
+│   ├── spending.py               # NEW — session/day token-spend ledger
+│   ├── router.py                  # NEW — Model Router (complexity + risk → tier)
+│   ├── audit.py                    # NEW — Audit Log
+│   ├── redaction.py                 # NEW — secret redaction for audit/failure-memory free-text
+│   ├── snapshot.py                   # NEW — git-based working-tree checkpoint/verify/rollback
+│   ├── loop_detection.py              # NEW — repeated-failure detection
+│   ├── failure_memory.py               # NEW — minimal failure-cause memory
+│   ├── heartbeat.py                     # NEW — experimental cheap local "needs attention" check
+│   ├── benchmark.py                      # shared benchmark implementation (CLI + scripts/benchmark.py)
+│   └── errors.py                          # GoldenBoyError and all typed subclasses
 ├── analytics/
 │   ├── data_quality.py         # Dataset Quality report over the local history log
 │   └── engine.py                 # cost/completion/failure-rate aggregates
 └── replay/
     └── engine.py               # run_backtest, walk_forward_folds
 
-sdk/typescript/               # thin TypeScript client -- see the SDK section above
-├── src/{types,client,validate,errors,index}.ts
-└── test/                      # real integration tests against the actual CLI
-
-docs/
-├── PROTOCOL.md              # Golden Boy Protocol schema + versioning policy
-├── DATASETS.md               # dataset/research landscape review
-└── LANGUAGE_STRATEGY.md       # why Python, why TypeScript where it is, why not Rust yet
+sdk/typescript/               # thin TypeScript client -- unchanged by this update
+docs/                          # PROTOCOL.md, DATASETS.md, LANGUAGE_STRATEGY.md
 ```
 
 </details>
 
 ---
 
-## ⚙️ Configuration
-
-Every policy threshold lives in `GoldenBoyConfig`, with this override order:
-
-```
-explicit constructor arg  >  GOLDENBOY_* environment variable  >  .goldenboy/config.json  >  default
-```
-
-| Field | Env var | Default | Meaning |
-|---|---|---|---|
-| `safety_margin` | `GOLDENBOY_SAFETY_MARGIN` | `3.0` | Percentage points reserved below reported remaining budget before it counts as exhausted. |
-| `caution_ratio` | `GOLDENBOY_CAUTION_RATIO` | `0.5` | Estimated-cost/usable-budget ratio at which risk moves from SAFE to CAUTION. |
-| `base_cost_per_unit` | `GOLDENBOY_BASE_COST_PER_UNIT` | `2.0` | Fallback per-unit cost when a plan's units don't declare one. |
-| `max_budget_tokens` | `GOLDENBOY_MAX_BUDGET_TOKENS` | `100000` | Token count treated as "100% of budget" when converting a raw token estimate into a percentage. |
-| `stale_after_seconds` | `GOLDENBOY_STALE_AFTER_SECONDS` | `300.0` | How long a refreshed provider reading stays `ESTIMATED` before aging to `STALE`. |
-
-Out-of-range values, malformed JSON, and unparseable `GOLDENBOY_*` env vars all raise a clear
-`ConfigError` — at the CLI, a one-line `error:` message and exit `1`, never a stack trace.
-
----
-
-## 🧭 Design Principles
-
-- **Lightweight** — the core install has no required third-party runtime dependencies; provider SDKs and the TypeScript SDK's own tooling are opt-in.
-- **Adaptive** — execution behavior changes with remaining budget *and* with how much to trust that number: a `STALE` or `UNKNOWN` reading can never produce a `SAFE` verdict.
-- **Deterministic** — identical inputs produce identical decisions. The estimator, classifier, and risk engine have no hidden randomness; adapter staleness is driven by an injectable clock, so it's testable without sleeping.
-- **Provider-optional** — `import goldenboy` never requires `anthropic` or `openai` to be installed.
-- **Agent-first** — Golden Boy decides how aggressively an agent should proceed based on the remaining budget. The calling agent remains responsible for understanding and decomposing the task.
-- **Fail safely** — malformed config, corrupted checkpoints, and invalid input produce a specific, human-readable error and exit code, never a raw traceback or silent data loss.
-- **Evidence over complexity** — no fabricated benchmark numbers, backtest results, or historical datasets, anywhere. `goldenboy replay`/`goldenboy.analytics` report `N/A`/`NO_DATA` rather than invent a baseline; see [`docs/DATASETS.md`](docs/DATASETS.md) and [`ROADMAP.md`](ROADMAP.md)'s explicit non-goals.
-
----
-
-## 📦 About Task Breakdowns
-
-> The estimated cost shown by `plan`/`run`/`analyze` is computed from the actual task text and repository
-> context — that number is real. The `plan`/`run` unit breakdown is **illustrative**: it is not an
-> LLM-generated decomposition of your task. Golden Boy intentionally keeps its core dependency-free and
-> out of the business of understanding *how* to do a task; actual task decomposition remains the
-> responsibility of the calling agent (see [Design Principles](#-design-principles)). `TaskClassifier`
-> tells you *what kind* of task it looks like, not how to break it into steps.
-
----
-
-## ⚠️ Limitations
-
-- Cost estimates are heuristic — prompt length, a bounded scan of the repo files the task's own wording gives evidence for, and an expected-output size scaled by a fixed complexity-signal table — not billing guarantees, and not a model of what an agent would actually load into context.
-- Context relevance is deterministic path/keyword matching (see [Key Capabilities](#-key-capabilities)), not semantic understanding. A task whose wording doesn't textually match any file path in the repo reports zero relevant context (with lower confidence) even if the task is, in fact, relevant to that repo — it is a recall-oriented heuristic, not a guarantee of finding every actually-relevant file.
-- `TaskClassifier` is a deterministic keyword matcher, not a trained model — its confidence score reflects match strength, not a calibrated probability. Same for the independent complexity score (`goldenboy.core.complexity`): a `0.72` means "this task matched signals totaling 0.72 of a fixed weight table," not "72% probability of anything." Neither has labeled real-world data to train/calibrate against yet (see `docs/DATASETS.md`).
-- `goldenboy replay`/`goldenboy.analytics` report `N/A`/`NO_DATA`, and `goldenboy calibrate` reports insufficient-data, until at least 10 real events/telemetry records are recorded locally — there is no bundled dataset standing in for either.
-- Replay's metrics are off-policy evaluation from logged outcomes: an event's recorded outcome reflects the decision Golden Boy actually made, not the alternate policy being scored — a descriptive comparison, not a causal guarantee (see [Replay and Backtesting](#-replay-and-backtesting)).
-- Calibration depends entirely on external agents actually calling `goldenboy report` — Golden Boy cannot observe execution outcomes on its own, and a `verification_status` of `VERIFIED` is only as trustworthy as whoever reported it; Golden Boy has no way to independently confirm a claimed verification.
-- Provider usage (rate-limit headers) can change outside Golden Boy's control between refreshes; that's exactly what `STALE` confidence exists to flag.
-- The `plan`/`run` unit breakdown is illustrative, not task decomposition (see above).
-- Golden Boy does not replace the calling coding agent's own judgment — it only informs how much to attempt.
-
----
-
-## ✅ Validation
-
-Golden Boy is validated, as of 2026-09-17 (protocol `1.1.0`), against:
-
-- **247 Python tests**, 95% line coverage (`pytest --cov`) — up from 186 tests / 95% on 2026-09-14 (the estimator/complexity/telemetry/calibration/multi-label upgrade added 61 tests; see CHANGELOG.md)
-- **21 TypeScript tests** (`npm test` in `sdk/typescript`), including real (non-mocked) integration tests against the actual installed CLI
-- Ruff and mypy clean, this environment (mypy 2.3.1) — mypy 1.19.1 compatibility was verified on 2026-09-14 and not independently re-run on 2026-09-17; CI (`mypy` job) checks the installed resolver's version on every push
-- `pip-audit`: 0 known vulnerabilities (re-run 2026-09-17)
-- Python 3.9–3.13, on GitHub Actions (Ubuntu only — see [Limitations](#-limitations) and `ARCHITECTURE_AUDIT.md` §8 on cross-platform CI)
-- A built wheel and sdist installed into an independent, fresh virtual environment, with every CLI command (including `report`/`calibrate`) exercised against it
-- A core-only install (`pip install goldenboy`) pulling zero third-party runtime dependencies — verified live via `pip list` against a clean-room install, not merely asserted
-
-CI (`.github/workflows/ci.yml`, 8 jobs):
-
-| Job | Result |
-|---|---|
-| security (pip-audit) | ✓ |
-| test (3.9) | ✓ |
-| test (3.10) | ✓ |
-| test (3.11) | ✓ |
-| test (3.12) | ✓ |
-| test (3.13) | ✓ |
-| build (wheel install + every CLI command + benchmark sanity check) | ✓ |
-| sdk-typescript (real integration against the installed CLI) | ✓ |
-
----
-
-## 📊 Benchmarks
-
-Measured locally (Apple M1 Pro, macOS arm64, Python 3.13.7) via `goldenboy benchmark` /
-`scripts/benchmark.py` (one shared implementation — see `goldenboy/core/benchmark.py`) — not part of CI's
-pass/fail gate (CI only checks the numbers are non-negative and the estimator is deterministic), not a
-guarantee. Re-run it yourself before relying on these numbers for anything.
-
-| Operation | Mean | Median | n |
-|---|---|---|---|
-| `Estimator.estimate_task()` (warm, this repo, 2026-09-17) | 41.44ms | 40.81ms | 20 |
-| `Estimator.estimate_task()` determinism | PASS — 1 distinct result across 10 identical calls | | 10 |
-| `RiskEngine.assess()` | <0.001ms | <0.001ms | 1000 |
-| CLI cold start (`goldenboy status`) | 119.09ms | 118.73ms | 5 |
-
-`RiskEngine.assess()` is pure arithmetic on already-computed values, so it's sub-microsecond by
-construction. `Estimator.estimate_task()` went from 9.30ms (2026-09-13) to 41.44ms (2026-09-17) — a real,
-measured increase, not noise: it now walks the repo tree twice (once for the whole-repo size figure, once
-scoring which files the task text actually points at — see [Key Capabilities](#-key-capabilities)) plus
-scores the task's own complexity signals. Still bounded by `_MAX_SCAN_FILES`/`_MAX_FILE_BYTES` and still
-imperceptible next to CLI cold start; see `BENCHMARKS.md`'s 2026-09-17 entry and
-`benchmarks/results/2026-09-17-scaling.md` for the full repo-size/prompt-size scaling curves. CLI cold
-start is mostly Python interpreter/import overhead — it's what you actually feel running any single
-`goldenboy` command. Full methodology, caveats, and the Rust-migration reasoning built on these numbers:
-[`BENCHMARKS.md`](BENCHMARKS.md) and [`docs/LANGUAGE_STRATEGY.md`](docs/LANGUAGE_STRATEGY.md).
-
----
-
-## 🗺 Roadmap
-
-**Shipped, tested, real:**
-
-- ✓ Task-aware cost estimation from *relevant* repo context (not whole-repo size) + an independent, explainable complexity model, adaptive execution modes, checkpoint/defer/resume, usage confidence incl. STALE detection
-- ✓ CLI (`plan`/`run`/`status`/`resume`/`doctor`/`analyze`/`validate`/`replay`/`report`/`calibrate`/`benchmark`/`export`)
-- ✓ Anthropic/OpenAI provider adapters, Claude Code skill integration
-- ✓ Golden Boy Protocol (versioned, language-neutral) + TypeScript SDK
-- ✓ Task classification (`TaskClassifier`, incl. secondary types) + `DecisionEngine` (explained action/confidence/reason)
-- ✓ Local history (`HistoryStore`) + data-quality/analytics reports
-- ✓ Baseline policies + `goldenboy.replay` backtest engine + walk-forward splitting
-- ✓ Execution telemetry contract (`ExecutionTelemetry`/`TelemetryStore`) + `goldenboy.core.calibration` (estimated-vs-actual MAE/RMSE/bias)
-- ✓ Benchmarking against deliberately large synthetic repos/history logs (`scripts/benchmark_scaling.py`)
-
-| Direction | Status |
-|---|---|
-| A real, populated backtest/calibration result (not `N/A`/insufficient-data) | Blocked on real usage data + telemetry accumulating — cannot be produced honestly today |
-| A learned task classifier / policy | Research — needs real labeled outcome data first |
-| Split `cli.py` into a `cli/` package | Planned — deferred this cycle (regression risk vs. benefit; see `ROADMAP.md`) |
-| Cross-platform CI (macOS/Windows smoke tests) | Planned — see `ARCHITECTURE_AUDIT.md` §8 |
-| `HistoryStore`/`TelemetryStore` streaming reads at very large log sizes | Planned — measured fine through 100MB/~214K events (`benchmarks/results/2026-09-17-scaling.md`); not yet a real problem |
-| Additional agent integrations (e.g. Codex) | Research — only with a real, documented usage signal to build against |
-
-Nothing above is claimed production-ready unless it's also covered by tests. Full breakdown of
-Done/Planned/Research, including explicit non-goals (no database, no web dashboard, no server, no premature
-ML or Rust), in [`ROADMAP.md`](ROADMAP.md).
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the setup steps, the checks a PR is
-expected to pass (`pytest`, `ruff`, `mypy`, `python -m build` — all enforced in CI), and the engineering
-principles review is held to: existing architecture first, root cause over symptom, no fake completeness,
-honest confidence labeling, and no hardcoded policy numbers outside `GoldenBoyConfig`.
-
----
-
-## 🛠 Development
+## Development
 
 ```bash
 git clone https://github.com/amuldi/GoldenBoy.git
@@ -873,6 +768,7 @@ pip install -e ".[dev]"
 pytest --cov=goldenboy --cov-report=term-missing
 ruff check goldenboy tests scripts run_tests.py
 mypy
+python -m build
 ```
 
 For the TypeScript SDK:
@@ -885,26 +781,171 @@ npm run typecheck && npm run build && npm test
 
 ---
 
-## 📚 More Docs
+## Testing
+
+- **403 Python tests** (`pytest`), **94% line coverage** — up from 247 tests / 95% before this update; 156
+  new tests cover the nine new modules and their CLI commands (`tests/test_governance.py`,
+  `test_spending.py`, `test_router.py`, `test_audit.py`, `test_redaction.py`, `test_loop_detection.py`,
+  `test_failure_memory.py`, `test_snapshot.py`, `test_heartbeat.py`, `test_cli_governance.py`).
+- **21 TypeScript tests** (`sdk/typescript`, unaffected by this update), including real integration tests
+  against the actual installed CLI — re-run and confirmed passing against this update's built wheel.
+- Ruff and mypy clean; `python -m build` produces an installable wheel whose every CLI command (old and
+  new) was exercised end-to-end against a fresh virtual environment.
+- Policy: allowed action → `ALLOW`; denied tool → `DENY`; approval-required action → `REQUIRE_APPROVAL`;
+  budget-exceeding request → `DENY`; dangerous command → `DENY` — all covered explicitly.
+- Loop detection: same failure repeated → count increments; threshold reached → `should_stop`; distinct
+  tool/args/error → distinct signature (no false-positive collapsing).
+- Snapshot: verification pass → kept; verification failure → `rollback()` restores pre-change content
+  (asserted on the actual file bytes, not just a return code).
+- Audit: policy decisions recorded automatically when wired; secrets in `error`/`extra` fields redacted
+  before the write, verified by reading the raw persisted file back, not just the in-memory object.
+
+---
+
+## Benchmarking
+
+Measured locally (Apple M1 Pro, macOS arm64, Python 3.13.7) via `goldenboy benchmark` / `scripts/
+benchmark.py` — one shared implementation, not part of CI's pass/fail gate, not a guarantee. Re-run it
+yourself before relying on these numbers.
+
+| Operation | Mean | Median | n |
+|---|---|---|---|
+| `Estimator.estimate_task()` (warm, this repo) | 61.22ms | 60.54ms | 20 |
+| `RiskEngine.assess()` | <0.001ms | <0.001ms | 1000 |
+| `PolicyEngine.evaluate()` | 0.007ms | 0.007ms | 200 |
+| `ModelRouter.route()` | 0.002ms | 0.002ms | 200 |
+| `AuditStore.record()` (local disk write) | 0.065ms | 0.056ms | 200 |
+| CLI cold start (`goldenboy status`) | 143.75ms | 142.52ms | 5 |
+
+`PolicyEngine`/`ModelRouter` are pure in-memory logic over already-known inputs — like `RiskEngine`, they're
+sub-microsecond-to-low-microsecond by construction, not a bottleneck. `AuditStore.record()` is the one new
+operation that touches disk (one JSONL line) and is still a fraction of a millisecond. Full methodology,
+the estimator/CLI-startup numbers' history, and an honest note on this run's machine load:
+[`BENCHMARKS.md`](BENCHMARKS.md).
+
+---
+
+## Design Principles
+
+- **Existing architecture first** — nothing shipped in this update renamed, restructured, or changed the
+  behavior of a pre-existing public API, CLI command, or config default. `goldenboy.core.governance`
+  (new Policy Engine) is deliberately named apart from `goldenboy.core.policies` (pre-existing replay
+  baselines) specifically to avoid colliding with that established, unrelated concept.
+- **Code-enforced, not prompt-enforced** — every governance decision (`ALLOW`/`DENY`/`REQUIRE_APPROVAL`,
+  loop-stop, rollback-on-fail) is a deterministic function over known inputs. None of it asks an LLM to
+  decide, and none of it is a warning an agent is free to ignore.
+- **Composable, not monolithic** — the [Architecture](#architecture) diagram is a recommendation, not
+  something wired together automatically inside `AdaptiveExecutor`/`budget_aware_execution`, which remain
+  unchanged. Use only the piece you need.
+- **Honest confidence** — an estimate is never displayed as an actual; an unconfigured Model Router tier
+  is `None`, never a guessed model name; a fresh install's audit/failure/loop state is genuinely empty, not
+  backfilled with placeholder data.
+- **No fabricated numbers** — every figure in this README (test counts, coverage, benchmark timings) was
+  measured while writing it; see [Testing](#testing) and [Benchmarking](#benchmarking).
+- **Minimal dependency surface** — the core install still has zero required third-party runtime
+  dependencies; `goldenboy snapshot` needs `git` (already required by any project this feature targets),
+  nothing new needs a database, a queue, or a network service.
+
+---
+
+## Design Inspiration
+
+Golden Boy incorporates selected design concepts from autonomous-agent-runtime research — policy
+enforcement, budget-aware execution, model routing, checkpoints, loop detection, failure memory, and
+execution auditing — adapted specifically to Golden Boy's own stated purpose: **controlling AI task cost
+and execution behavior**, not building a general autonomous-agent platform.
+
+Golden Boy is **not a fork** of any such project, and does not implement — in any form, anywhere in this
+codebase — a wallet, cryptocurrency (USDC or otherwise), an x402/ERC-8004-style payment or identity
+protocol, an agent marketplace, an agent-to-agent social network, agent replication/spawning, a
+self-funded-AI-business model, or autonomous trading. None of these has any connection to Golden Boy's
+purpose; see `ROADMAP.md`'s "Explicit non-goals" for that stated in full, and as a checkable claim rather
+than an assumption.
+
+---
+
+## Limitations
+
+- Cost estimates are heuristic (prompt length + a bounded, keyword-matched scan of relevant repo files +
+  an expected-output multiplier) — not billing guarantees.
+- `TaskClassifier`/complexity scoring are deterministic keyword matchers, not trained models; a confidence
+  score reflects match strength, not a calibrated probability.
+- The Policy Engine's command/path rules are regex- and glob-based, not semantic — a command that achieves
+  the same destructive effect through different wording can evade a specific pattern; the default rule set
+  is a reasonable starting point, not an exhaustive one, and is meant to be extended via
+  `.goldenboy/policy.json` for your own environment.
+- `goldenboy.core.snapshot` rollback does not restore/remove files that were untracked at snapshot time or
+  created after it — only tracked-file content is covered (see [Checkpoint & Recovery](#checkpoint--recovery)).
+- Loop detection and failure memory are per-machine, local state (`.goldenboy/`) — they don't share
+  knowledge across machines or CI runs unless you deliberately sync that directory.
+- `failure_memory.find_similar()` is keyword-overlap (Jaccard) similarity, not semantic search — it will
+  miss failures described in very different words even if the underlying cause is the same.
+- `goldenboy heartbeat` is **experimental**: a reasonable starting set of cheap local checks (pending
+  checkpoint, exhausted/changed budget, a loop-detection stop), not a completeness guarantee, and
+  explicitly not a background daemon — Golden Boy still does not run a server or scheduler of its own; a
+  caller's own scheduler decides when to invoke it.
+- None of the new governance modules are automatically wired into `AdaptiveExecutor`/
+  `budget_aware_execution` — composing them is the integrator's responsibility (see
+  [Design Principles](#design-principles)).
+- `goldenboy replay`/`goldenboy.analytics`/`goldenboy calibrate` still report `N/A`/`NO_DATA` until at
+  least 10 real events/telemetry records exist locally — unchanged by this update.
+- Golden Boy does not replace the calling agent's own judgment or a human reviewer's — `REQUIRE_APPROVAL`
+  exists to keep a human in the loop for consequential actions, not to simulate one.
+
+---
+
+## Roadmap
+
+**Shipped, tested, real (this update, 2026-09-18):** Policy Engine · session/day budget ledger · Model
+Router · Audit Log · secret redaction · git-based snapshot/verify/rollback · loop detection · failure
+memory · Heartbeat (experimental).
+
+**Shipped, tested, real (prior):** task-aware cost estimation from relevant repo context, adaptive
+execution modes, checkpoint/defer/resume, usage confidence incl. STALE detection, the Golden Boy Protocol
++ TypeScript SDK, task classification + `DecisionEngine`, local history + analytics, baseline-policy
+backtesting, execution telemetry + calibration.
+
+| Direction | Status |
+|---|---|
+| Deep automatic wiring of the Policy Engine/Audit Log into `AdaptiveExecutor`/`budget_aware_execution` | Explicit non-goal for now — see [Design Principles](#design-principles) |
+| A real, populated backtest/calibration result (not `N/A`) | Blocked on real usage data accumulating locally |
+| A learned task classifier, policy, or loop/failure-similarity model | Research — needs real labeled outcome data first, same "deterministic baseline first" gate the pre-existing `TaskClassifier` already follows |
+| Cross-platform CI (macOS/Windows smoke tests) | Planned |
+| Any wallet/cryptocurrency/agent-marketplace/agent-replication feature | **Not planned** — see [Design Inspiration](#design-inspiration) |
+
+Full Done/Planned/Research breakdown, including every explicit non-goal, in [`ROADMAP.md`](ROADMAP.md).
+
+---
+
+## Contributing
+
+Contributions are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the setup steps, the checks a PR is
+expected to pass (`pytest`, `ruff`, `mypy`, `python -m build` — all enforced in CI), and the engineering
+principles review is held to: existing architecture first, root cause over symptom, no fake completeness,
+honest confidence labeling, and no hardcoded policy numbers outside a config dataclass.
+
+---
+
+## More Docs
 
 | Doc | Covers |
 |---|---|
+| [`SECURITY.md`](SECURITY.md) | Every `.goldenboy/*` file's contents, secret redaction, subprocess usage, and how to report a vulnerability. |
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | The Golden Boy Protocol schema, versioning policy, and why there's no server. |
-| [`docs/DATASETS.md`](docs/DATASETS.md) | Dataset/research landscape review (SWE-bench, HumanEval, LiveCodeBench, RepoBench, token-consumption research) and why none of them substitute for `HistoryStore`. |
-| [`docs/LANGUAGE_STRATEGY.md`](docs/LANGUAGE_STRATEGY.md) | Why Python remains the core, where TypeScript is used, and the future Rust migration boundary. |
-| [`CHANGELOG.md`](CHANGELOG.md) | What changed release to release. |
+| [`docs/DATASETS.md`](docs/DATASETS.md) | Dataset/research landscape review and why none of them substitute for `HistoryStore`. |
+| [`docs/LANGUAGE_STRATEGY.md`](docs/LANGUAGE_STRATEGY.md) | Why Python remains the core, where TypeScript is used, and the Rust migration boundary. |
+| [`CHANGELOG.md`](CHANGELOG.md) | What changed, release to release — see the 2026-09-18 entry for this update in full. |
 | [`ROADMAP.md`](ROADMAP.md) | Full Done / Planned / Research breakdown, including explicit non-goals. |
-| [`BENCHMARKS.md`](BENCHMARKS.md) | Measured performance numbers, methodology, and what isn't measured yet. |
-| [`SECURITY.md`](SECURITY.md) | How credentials and local history are handled, and how to report a vulnerability. |
+| [`BENCHMARKS.md`](BENCHMARKS.md) | Measured performance numbers, methodology, and machine-load caveats. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Setup, checks, and the engineering principles reviews are held to. |
 | [`sdk/typescript/README.md`](sdk/typescript/README.md) | TypeScript SDK API reference and design notes. |
 
 ---
 
-## 📄 License
+## License
 
 [MIT](LICENSE).
 
 <p align="center">
-  ⭐ If Golden Boy saves your agent from burning through its budget, a star helps more people find it.
+  ⭐ If Golden Boy keeps your agent inside its budget and off your <code>.env</code> file, a star helps more people find it.
 </p>

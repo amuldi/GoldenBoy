@@ -5,6 +5,130 @@ All notable changes to this project are documented in this file, using the
 
 ## [Unreleased]
 
+### Budget-aware, policy-governed, verifiable agent runtime (2026-09-18)
+
+Selectively adopts autonomous-agent-runtime design concepts (policy
+enforcement, budget-aware execution, model routing, checkpoints, loop
+detection, failure memory, execution auditing) into Golden Boy's existing
+architecture, scoped to Golden Boy's own stated purpose (controlling AI
+task cost and execution behavior) — not a wholesale adoption of any other
+project's feature set. See README.md's "Design Inspiration" section for
+what was and wasn't adopted, and the new modules' own docstrings for the
+specific reasoning behind each one.
+
+All of the below is additive: no existing public API, CLI command, or
+config default changed behavior. `goldenboy/__init__.py`'s previously
+existing exports are unchanged; new ones were only added.
+
+#### Added
+
+- **Policy Engine** (`goldenboy/core/governance.py`, `goldenboy policy`
+  CLI command): code-level, not prompt-level, enforcement of what an agent
+  action is allowed to do. `PolicyEngine.evaluate()` runs four checks in a
+  fixed order (permission → budget → risk → scope) and returns
+  `ALLOW`/`DENY`/`REQUIRE_APPROVAL` — never a warning. Rules (denied
+  tools/commands, protected file-path patterns, session/day budget caps,
+  a single-action cost-approval threshold) live in `PolicyConfig`, loaded
+  from `.goldenboy/policy.json` via the same defaults → file → env-var
+  cascade `GoldenBoyConfig` already uses. Deliberately named/namespaced
+  apart from the pre-existing `goldenboy.core.policies` module (baseline
+  proceed/stop policies used by `goldenboy replay`) to avoid colliding
+  with that established, unrelated concept.
+- **Budget ledger** (`goldenboy/core/spending.py`, `goldenboy spend` CLI
+  command): session- and day-scoped cumulative token spend tracking in
+  absolute tokens, layered on top of (not replacing) `Budget`/
+  `RiskEngine`'s existing per-check percentage semantics. Keeps
+  `estimated_tokens` and `actual_tokens` distinct in every field and
+  render path — an estimate is never displayed as if it were measured.
+- **Model Router** (`goldenboy/core/router.py`, `goldenboy route` CLI
+  command): maps task complexity (`DecisionEngine`'s existing
+  LOW/MEDIUM/HIGH/VERY_HIGH label — reused, not reinvented) and budget
+  risk (`RiskEngine`'s existing `ExecutionMode` — reused) to one of six
+  provider-neutral tiers (`STOP`/`MINIMAL`/`CHEAP`/`STANDARD`/`HIGH`/
+  `HIGHEST`). Budget risk can only downgrade the tier complexity alone
+  would imply, never upgrade it. Ships with zero real model names or
+  pricing data — mapping a tier to an actual model identifier is optional,
+  caller-supplied config (`.goldenboy/router.json`); unconfigured, a
+  `RoutingDecision.model_name` is `None`, not a guess.
+- **Audit Log** (`goldenboy/core/audit.py`, `goldenboy audit` CLI
+  command): an append-only, human-reviewable record of governance
+  decisions (action, tool, policy verdict/reason, estimated/actual cost,
+  result, error), distinct in scope from the pre-existing `HistoryStore`
+  (which records `budget_aware_execution`'s own decisions for
+  analytics/replay). `PolicyEngine` writes to it automatically when
+  constructed with an `AuditStore`. `error`/`extra` free-text fields pass
+  through the new `goldenboy.core.redaction.redact_secrets` first.
+- **Secret redaction** (`goldenboy/core/redaction.py`): pattern-based
+  best-effort masking of common credential shapes (API keys, bearer
+  tokens, `key=value` assignments) in free-text fields before they're
+  persisted — a defensive second layer behind "never pass a secret in".
+- **Checkpoint / rollback of working-tree changes**
+  (`goldenboy/core/snapshot.py`, `goldenboy snapshot` CLI command):
+  git-based (no second version-control system) — `create()` records the
+  current commit plus a `git stash create` object (touches nothing in the
+  working tree/index/stash list), `verify()` runs caller-supplied
+  typecheck/test/build commands in order, and `rollback()` restores
+  tracked-file content to snapshot time via `git checkout <sha> -- .`.
+  Named `snapshot`, not `checkpoint`, specifically to not collide with the
+  pre-existing, unrelated `CheckpointManager` (task-plan checkpoint/resume).
+  Known, documented limitation: files that were untracked at snapshot time
+  are not restored/removed by rollback.
+- **Loop detection** (`goldenboy/core/loop_detection.py`, `goldenboy loop`
+  CLI command): persistent per-(tool, args, error)-signature repeat
+  counter; `GoldenBoyConfig.loop_repeat_threshold` (new config field,
+  default 3) controls when `should_stop` becomes `True`. Only a hash of
+  the signature is persisted, not the raw text, matching
+  `HistoryStore.TaskEvent.prompt_hash`'s existing privacy convention.
+- **Failure memory** (`goldenboy/core/failure_memory.py`, `goldenboy
+  failure` CLI command): a minimal record of why past tasks failed, keyed
+  by a normalized (digits blanked) signature hash so near-identical
+  failures accumulate one `attempt_count` instead of duplicating.
+  `find_similar()` does keyword-overlap (Jaccard) matching, no embeddings
+  or vector database, per the project brief's "keep it simple" directive.
+- **Heartbeat** (`goldenboy/core/heartbeat.py`, `goldenboy heartbeat` CLI
+  command) — **experimental**: a single, synchronous, local-file-only
+  "does anything need attention" check (pending checkpoint, exhausted or
+  changed budget, a loop-detection stop). Never calls an LLM or makes a
+  network request, and is explicitly not a background daemon/server —
+  Golden Boy still does not run one (see ROADMAP.md's non-goals); a
+  caller's own scheduler invokes `check()`/`goldenboy heartbeat`
+  periodically.
+- `GoldenBoyConfig.loop_repeat_threshold` (new field, default `3`,
+  range `[1, inf)`), following the same range-validated,
+  env-var-overridable pattern as the module's existing fields.
+- 189 new tests across `tests/test_governance.py`, `test_spending.py`,
+  `test_router.py`, `test_audit.py`, `test_redaction.py`,
+  `test_loop_detection.py`, `test_failure_memory.py`, `test_snapshot.py`,
+  `test_heartbeat.py`, and `test_cli_governance.py` (186 → 375 total).
+
+#### Changed
+
+- `.gitignore`: added `.DS_Store`.
+- `SECURITY.md`: documented the new `.goldenboy/*` files above, the
+  secret-redaction layer, and corrected a since-stale claim that the
+  package contained no `subprocess` calls (it did already, in
+  `goldenboy/core/benchmark.py`'s CLI-startup benchmark — `snapshot.py`'s
+  git/verify-command invocations are new, documented alongside it).
+- `.github/workflows/ci.yml`: the build job's installed-wheel smoke check
+  now also exercises every new CLI command.
+
+#### Explicitly not done in this change (see README.md's honesty labeling)
+
+- No wallet/USDC/x402/ERC-8004/blockchain identity/agent marketplace/
+  agent-replication/self-funded-agent-economy/autonomous-trading feature
+  of any kind — out of scope for Golden Boy's stated purpose, not adopted.
+- No deep, automatic wiring of the Policy Engine/Audit Log into
+  `AdaptiveExecutor`/`budget_aware_execution` — those two remain
+  unchanged and fully backward-compatible; the new modules are
+  independently composable (own CLI command, own Python API), the same
+  shape `budget_aware_execution` itself already uses ("wrap your own
+  callable"), rather than forcing a new mandatory pipeline through
+  already-tested, already-stable code.
+- No learned/ML component anywhere in the new modules (loop detection,
+  failure memory, and the router are all fixed, deterministic logic) —
+  same "deterministic baseline first" principle the pre-existing
+  `TaskClassifier`/`GoldenBoyPolicy` already follow.
+
 ### Evidence-driven intelligence & telemetry upgrade (2026-09-17)
 
 Closes the P0 gap flagged (but deliberately not fixed) by the 2026-09-15

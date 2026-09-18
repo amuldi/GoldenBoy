@@ -42,6 +42,9 @@ class BenchmarkReport:
     estimator_distinct_results: Optional[int]
     risk_engine_latency: Optional[LatencySample]
     cli_startup_latency: Optional[LatencySample]
+    policy_engine_latency: Optional[LatencySample] = None
+    model_router_latency: Optional[LatencySample] = None
+    audit_log_write_latency: Optional[LatencySample] = None
     errors: Dict[str, str] = field(default_factory=dict)
 
     def render(self) -> str:
@@ -58,6 +61,12 @@ class BenchmarkReport:
             lines.append(self.risk_engine_latency.render())
         if self.cli_startup_latency:
             lines.append(self.cli_startup_latency.render())
+        if self.policy_engine_latency:
+            lines.append(self.policy_engine_latency.render())
+        if self.model_router_latency:
+            lines.append(self.model_router_latency.render())
+        if self.audit_log_write_latency:
+            lines.append(self.audit_log_write_latency.render())
         for label, error in self.errors.items():
             lines.append(f"{label}: SKIPPED ({error})")
         return "\n".join(lines)
@@ -108,6 +117,45 @@ def benchmark_risk_engine():
     return _sample("RiskEngine.assess()", samples)
 
 
+def benchmark_policy_engine():
+    from goldenboy.core.governance import ActionRequest, PolicyConfig, PolicyEngine
+
+    engine = PolicyEngine(config=PolicyConfig())
+    request = ActionRequest(
+        tool="bash", command="pytest tests/ && ruff check .", estimated_cost_percentage=5.0
+    )
+    samples = _time_it(lambda: engine.evaluate(request), iterations=200)
+    return _sample("PolicyEngine.evaluate()", samples)
+
+
+def benchmark_model_router():
+    from goldenboy.core.risk import ExecutionMode
+    from goldenboy.core.router import ModelRouter, RouterConfig
+
+    router = ModelRouter(config=RouterConfig())
+    samples = _time_it(lambda: router.route("HIGH", ExecutionMode.CAUTION), iterations=200)
+    return _sample("ModelRouter.route()", samples)
+
+
+def benchmark_audit_log_write():
+    import shutil
+    import tempfile
+
+    from goldenboy.core.audit import AuditEntry, AuditStore
+
+    tmp_dir = tempfile.mkdtemp(prefix="goldenboy-benchmark-audit-")
+    try:
+        store = AuditStore(history_dir=tmp_dir)
+        entry = AuditEntry.create(
+            action="policy_check", result="success", tool="bash", decision="allow",
+            policy_result="ALLOWED", estimated_cost=5.0,
+        )
+        samples = _time_it(lambda: store.record(entry), iterations=200)
+        return _sample("AuditStore.record() [local disk write]", samples)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def benchmark_cli_startup():
     goldenboy_bin = str(Path(sys.executable).parent / "goldenboy")
     samples = []
@@ -146,6 +194,24 @@ def run_all() -> BenchmarkReport:
     except Exception as e:
         errors["cli_startup"] = str(e)
 
+    policy_latency = None
+    try:
+        policy_latency = benchmark_policy_engine()
+    except Exception as e:  # pragma: no cover - defensive
+        errors["policy_engine"] = str(e)
+
+    router_latency = None
+    try:
+        router_latency = benchmark_model_router()
+    except Exception as e:  # pragma: no cover - defensive
+        errors["model_router"] = str(e)
+
+    audit_latency = None
+    try:
+        audit_latency = benchmark_audit_log_write()
+    except Exception as e:  # pragma: no cover - defensive
+        errors["audit_log_write"] = str(e)
+
     return BenchmarkReport(
         platform=sys.platform,
         python_version=sys.version.split()[0],
@@ -154,5 +220,8 @@ def run_all() -> BenchmarkReport:
         estimator_distinct_results=estimator_distinct,
         risk_engine_latency=risk_latency,
         cli_startup_latency=cli_latency,
+        policy_engine_latency=policy_latency,
+        model_router_latency=router_latency,
+        audit_log_write_latency=audit_latency,
         errors=errors,
     )

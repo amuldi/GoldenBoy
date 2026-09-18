@@ -18,14 +18,31 @@ from importlib.metadata import version as _version
 
 from goldenboy.adapters.base import ProviderAdapter
 from goldenboy.adapters.mock import MockProvider
+from goldenboy.core.audit import AuditEntry, AuditStore
 from goldenboy.core.budget import Budget, UsageConfidence
 from goldenboy.core.checkpoint import CheckpointManager
 from goldenboy.core.config import GoldenBoyConfig
 from goldenboy.core.decision_engine import DecisionEngine
-from goldenboy.core.errors import CheckpointError, ConfigError, GoldenBoyError
+from goldenboy.core.errors import (
+    CheckpointError,
+    ConfigError,
+    GoldenBoyError,
+    PolicyError,
+    SnapshotError,
+)
 from goldenboy.core.estimator import Estimator, TaskEstimate
 from goldenboy.core.executor import AdaptiveExecutor
+from goldenboy.core.failure_memory import FailureMemoryStore, FailureRecord
+from goldenboy.core.governance import (
+    ActionRequest,
+    PolicyConfig,
+    PolicyEngine,
+    PolicyResult,
+    PolicyVerdict,
+)
+from goldenboy.core.heartbeat import HeartbeatResult
 from goldenboy.core.history import HistoryStore, TaskEvent
+from goldenboy.core.loop_detection import LoopCheckResult, LoopDetector
 from goldenboy.core.policies import (
     ComplexityOnlyPolicy,
     FixedThresholdPolicy,
@@ -36,6 +53,9 @@ from goldenboy.core.policies import (
 )
 from goldenboy.core.priorities import ExecutionUnit, Priority
 from goldenboy.core.risk import ExecutionMode, RiskEngine
+from goldenboy.core.router import ModelRouter, ModelTier, RouterConfig, RoutingDecision
+from goldenboy.core.snapshot import Snapshot, SnapshotManager, VerifyResult
+from goldenboy.core.spending import LedgerSummary, SessionMarker, SpendEntry, SpendingStore
 from goldenboy.core.task_classifier import TaskClassifier
 from goldenboy.core.task_types import DecisionAction, TaskType
 from goldenboy.integration import budget_aware_execution
@@ -88,8 +108,43 @@ __all__ = [
     "ComplexityOnlyPolicy",
     "UsageOnlyPolicy",
     "GoldenBoyPolicy",
+    # Policy Engine (agent-action governance — distinct from the replay
+    # baselines above; see goldenboy.core.governance)
+    "PolicyEngine",
+    "PolicyConfig",
+    "ActionRequest",
+    "PolicyResult",
+    "PolicyVerdict",
+    # Budget ledger (session/day spend tracking, in absolute tokens)
+    "SpendingStore",
+    "SpendEntry",
+    "LedgerSummary",
+    "SessionMarker",
+    # Model Router
+    "ModelRouter",
+    "RouterConfig",
+    "RoutingDecision",
+    "ModelTier",
+    # Audit Log
+    "AuditStore",
+    "AuditEntry",
+    # Checkpoint / rollback of working-tree changes (git-based; distinct
+    # from CheckpointManager's task-plan checkpoint above)
+    "SnapshotManager",
+    "Snapshot",
+    "VerifyResult",
+    # Loop detection
+    "LoopDetector",
+    "LoopCheckResult",
+    # Failure memory
+    "FailureMemoryStore",
+    "FailureRecord",
+    # Heartbeat (experimental — see README.md)
+    "HeartbeatResult",
     # Errors
     "GoldenBoyError",
     "ConfigError",
     "CheckpointError",
+    "PolicyError",
+    "SnapshotError",
 ]
