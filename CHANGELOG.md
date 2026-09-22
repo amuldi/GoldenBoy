@@ -5,6 +5,84 @@ All notable changes to this project are documented in this file, using the
 
 ## [Unreleased]
 
+### Execution intelligence: Risk Budget, failure classification, execution trace (2026-09-22)
+
+An additive follow-on to the 2026-09-18 governance update below. Before writing any code, the existing
+codebase was audited against a much larger feature brief (cost intelligence, predicted-vs-actual telemetry,
+risk budget, adaptive permission, verification loop, failure classification, loop detection, checkpoint/
+recovery, execution memory, execution trace) — most of it was already implemented (`Estimator`/
+`TaskEstimate`, `calibration.py`/`telemetry.py`, `PolicyEngine`, `LoopDetector`, `CheckpointManager`/
+`SnapshotManager`, `FailureMemoryStore`, `AuditStore`) and is reused unchanged. Only the genuine gaps below
+were built. All additive: no existing public API, CLI command, config default, or test changed behavior;
+baseline was 403 tests / ruff clean / mypy clean before this work started.
+
+#### Added
+
+- **Risk Budget** (`goldenboy/core/risk_budget.py`, `goldenboy risk` CLI command): a cumulative,
+  point-based risk accounting model, distinct from both `RiskEngine` (budget-ratio, stateless,
+  "will this task exceed budget?") and `PolicyEngine` (rule-matching, stateless, "is this one action
+  allowed?"). `RiskBudgetEngine.record()` deducts a configurable weight per operation from a persisted,
+  session-cumulative total (`.goldenboy/risk_budget_state.json`) and returns `PolicyVerdict.ALLOW`/
+  `REQUIRE_APPROVAL`/`DENY` (the same three-value type `PolicyEngine` already uses, reused rather than
+  duplicated) as the running total crosses configured thresholds. Deduction is monotonic — `remaining` only
+  decreases via `record()`, or is explicitly reset via `reset()` — which is what makes it *adaptive* in the
+  brief's sense: permissions tighten as risk accumulates within a session and never loosen on their own. A
+  caller-supplied `repeat_count` (e.g. from `LoopDetector`'s count or a `FailureRecord.attempt_count`) adds
+  an extra penalty for repeating the same failing action, without this module needing to know anything
+  about loops or failures itself. Operation weights are the brief's example values, explicitly documented
+  as not a validated risk model, fully overridable via `.goldenboy/risk_budget.json` (same defaults → file
+  → env-var cascade every other config in this project uses). Config and state deliberately use different
+  default filenames (`risk_budget.json` vs. `risk_budget_state.json`) — an early version of this change
+  had them collide on the same path, caught by a regression test
+  (`test_config_and_state_files_do_not_collide`) before it shipped.
+- **Failure classification** (`goldenboy/core/failure_memory.py`): a new `FailureCategory` enum (`SYNTAX`,
+  `TEST_FAILURE`, `DEPENDENCY`, `PERMISSION`, `ENVIRONMENT`, `TIMEOUT`, `RESOURCE_LIMIT`, `POLICY_DENIAL`,
+  `UNKNOWN`) and a deterministic, ordered-regex `classify_failure()` function, same "start with a
+  deterministic baseline" convention `TaskClassifier` already uses — no learned model. `FailureRecord`
+  gains an optional `category` field (defaults to `UNKNOWN` for records written before this field existed,
+  verified by a backward-compatibility test). `FailureMemoryStore.record()` auto-classifies from
+  `cause_summary` unless an explicit `category` is passed; `goldenboy failure record` gained a `--category`
+  override flag and now prints the classified category.
+- **Execution Trace** (`goldenboy/core/audit.py`, `goldenboy trace <task_id>` CLI command): a new
+  `EventType` class documenting a suggested (not enforced) event-name vocabulary spanning a task's full
+  lifecycle (`TASK_STARTED`, `ESTIMATE_CREATED`, `POLICY_CHECKED`, `ACTION_ALLOWED`, `ACTION_EXECUTED`,
+  `VERIFICATION_FAILED`, `FAILURE_CLASSIFIED`, `RETRY_STARTED`, `RISK_ESCALATED`, `APPROVAL_REQUIRED`,
+  `ROLLBACK_STARTED`, `TASK_COMPLETED`), and a new `AuditStore.trace(task_id)` method returning every
+  recorded entry for one task, in write order — distinct from `goldenboy audit`'s unfiltered, recency-
+  limited view. `AuditEntry.action` remains a free-form string; existing writers (`PolicyEngine`'s
+  `"policy_check"`) are unaffected.
+- Benchmarks: `goldenboy benchmark` gained two new measurements, `RiskBudgetEngine.record()` (local disk
+  read+write) and `SnapshotManager.create()` (git stash create, clean tree) — the latter was measurable
+  before but not previously benchmarked. See `BENCHMARKS.md` for a fresh, consistent full run.
+- Public API: `RiskBudgetEngine`, `RiskBudgetConfig`, `RiskBudgetResult`, `RiskBudgetState`,
+  `FailureCategory`, `classify_failure`, and `EventType` added to `goldenboy/__init__.py`'s `__all__`.
+  `RiskBudgetError` (like `FailureMemoryError`/`LoopStateError`/`AuditError` before it) is intentionally
+  *not* exported at the top level — module-local errors stay module-local.
+- 45 new tests (`tests/test_risk_budget.py`, plus additions to `test_failure_memory.py`, `test_audit.py`,
+  `test_cli_governance.py`, `test_public_api.py`, `test_benchmark.py`); 403 → 448 total, 94% → 93% line
+  coverage (denominator grew faster than covered lines — no coverage regression in any touched file).
+
+#### Explicitly not done, and why
+
+- No new `docs/*.md` files (the brief suggested `architecture.md`/`policy.md`/`budgets.md`/etc.) — this
+  project's existing convention is module docstrings + README, not one doc file per module; `docs/` is
+  reserved for genuinely cross-cutting topics (`PROTOCOL.md`, `DATASETS.md`, `LANGUAGE_STRATEGY.md`). Adding
+  eight thin per-module stubs would be duplication, not documentation.
+- No separate "execution memory" store for successful-recovery patterns — `FailureMemoryStore.resolve()`
+  already records what fixed a given failure signature, which is the same information a parallel store
+  would hold. Building a second store for it would be duplication for its own sake.
+- No new "verification loop" orchestrator class tying PLAN→EXECUTE→TEST→DIAGNOSE→RETRY together — Golden
+  Boy does not execute agent work itself (see ROADMAP.md's non-goals), and a new class whose only job is to
+  call `SnapshotManager.verify()`, `classify_failure()`, and `LoopDetector.record()` in sequence would be
+  exactly the "one giant orchestration class" the brief itself warns against; the three pieces are already
+  independently composable by a caller.
+- No qualitative-confidence-bucket rework of `TaskEstimate` (the brief wanted `estimated_tool_calls`/
+  `estimated_duration`/HIGH-MEDIUM-LOW confidence labels) — `Estimator` already reports a real, evidenced
+  confidence float, and estimating tool-call counts or wall-clock duration would require a correlation
+  model this project has no real data to back, which conflicts with the project's own "no unverified
+  claims" principle (see ROADMAP.md's "Data & learning" section on why a learned model is gated on real
+  data existing first).
+
 ### Budget-aware, policy-governed, verifiable agent runtime (2026-09-18)
 
 Selectively adopts autonomous-agent-runtime design concepts (policy

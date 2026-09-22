@@ -45,6 +45,8 @@ class BenchmarkReport:
     policy_engine_latency: Optional[LatencySample] = None
     model_router_latency: Optional[LatencySample] = None
     audit_log_write_latency: Optional[LatencySample] = None
+    risk_budget_latency: Optional[LatencySample] = None
+    snapshot_create_latency: Optional[LatencySample] = None
     errors: Dict[str, str] = field(default_factory=dict)
 
     def render(self) -> str:
@@ -67,6 +69,10 @@ class BenchmarkReport:
             lines.append(self.model_router_latency.render())
         if self.audit_log_write_latency:
             lines.append(self.audit_log_write_latency.render())
+        if self.risk_budget_latency:
+            lines.append(self.risk_budget_latency.render())
+        if self.snapshot_create_latency:
+            lines.append(self.snapshot_create_latency.render())
         for label, error in self.errors.items():
             lines.append(f"{label}: SKIPPED ({error})")
         return "\n".join(lines)
@@ -156,6 +162,44 @@ def benchmark_audit_log_write():
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def benchmark_risk_budget():
+    import shutil
+    import tempfile
+
+    from goldenboy.core.risk_budget import RiskBudgetConfig, RiskBudgetEngine
+
+    tmp_dir = tempfile.mkdtemp(prefix="goldenboy-benchmark-riskbudget-")
+    try:
+        engine = RiskBudgetEngine(config=RiskBudgetConfig(), state_dir=tmp_dir)
+        samples = _time_it(lambda: engine.record("shell_command"), iterations=200)
+        return _sample("RiskBudgetEngine.record() [local disk read+write]", samples)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def benchmark_snapshot_create():
+    import shutil
+    import subprocess
+    import tempfile
+
+    from goldenboy.core.snapshot import SnapshotManager
+
+    tmp_dir = tempfile.mkdtemp(prefix="goldenboy-benchmark-snapshot-")
+    try:
+        subprocess.run(["git", "init", "-q", tmp_dir], check=True, capture_output=True)
+        subprocess.run(["git", "-C", tmp_dir, "config", "user.email", "bench@example.com"], check=True)
+        subprocess.run(["git", "-C", tmp_dir, "config", "user.name", "Bench"], check=True)
+        (Path(tmp_dir) / "a.py").write_text("print(1)\n")
+        subprocess.run(["git", "-C", tmp_dir, "add", "a.py"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", tmp_dir, "commit", "-q", "-m", "init"], check=True, capture_output=True)
+
+        mgr = SnapshotManager(repo_dir=tmp_dir, state_dir=str(Path(tmp_dir) / ".goldenboy"))
+        samples = _time_it(lambda: mgr.create(label="bench"), iterations=20)
+        return _sample("SnapshotManager.create() [git stash create, clean tree]", samples)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def benchmark_cli_startup():
     goldenboy_bin = str(Path(sys.executable).parent / "goldenboy")
     samples = []
@@ -212,6 +256,18 @@ def run_all() -> BenchmarkReport:
     except Exception as e:  # pragma: no cover - defensive
         errors["audit_log_write"] = str(e)
 
+    risk_budget_latency = None
+    try:
+        risk_budget_latency = benchmark_risk_budget()
+    except Exception as e:  # pragma: no cover - defensive
+        errors["risk_budget"] = str(e)
+
+    snapshot_latency = None
+    try:
+        snapshot_latency = benchmark_snapshot_create()
+    except Exception as e:
+        errors["snapshot_create"] = str(e)
+
     return BenchmarkReport(
         platform=sys.platform,
         python_version=sys.version.split()[0],
@@ -223,5 +279,7 @@ def run_all() -> BenchmarkReport:
         policy_engine_latency=policy_latency,
         model_router_latency=router_latency,
         audit_log_write_latency=audit_latency,
+        risk_budget_latency=risk_budget_latency,
+        snapshot_create_latency=snapshot_latency,
         errors=errors,
     )

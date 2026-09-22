@@ -10,7 +10,8 @@ these numbers for anything.
 
 Measured: estimator latency and determinism, risk-assessment latency, CLI
 cold-start time, Policy Engine evaluation latency, Model Router latency,
-and Audit Log write latency — all local, no network calls.
+Audit Log write latency, Risk Budget accounting latency, and git-based
+Snapshot creation latency — all local, no network calls.
 
 Not yet measured (Research in `ROADMAP.md`): anything involving a real
 provider API call (`refresh_usage()` latency depends entirely on network/API
@@ -25,6 +26,28 @@ separate from the one below: it takes tens of seconds to run (it builds
 synthetic repositories and multi-hundred-MB files on disk) rather than
 milliseconds, so it isn't part of the routine "run this before relying on
 these numbers" workflow this file documents.
+
+## 2026-09-22 — Apple M1 Pro, macOS (arm64), Python 3.13.7 (after the execution-intelligence upgrade)
+
+```
+Estimator.estimate_task() [warm, this repo]: mean=62.711ms median=61.337ms min=60.152ms max=73.469ms (n=20)
+Estimator.estimate_task() determinism: PASS (1 distinct result(s) across 10 identical calls)
+RiskEngine.assess(): mean=0.000ms median=0.000ms min=0.000ms max=0.009ms (n=1000)
+CLI cold start (`goldenboy status`): mean=130.941ms median=130.353ms min=128.697ms max=134.809ms (n=5)
+PolicyEngine.evaluate(): mean=0.007ms median=0.007ms min=0.006ms max=0.022ms (n=200)
+ModelRouter.route(): mean=0.002ms median=0.002ms min=0.001ms max=0.011ms (n=200)
+AuditStore.record() [local disk write]: mean=0.057ms median=0.051ms min=0.045ms max=0.445ms (n=200)
+RiskBudgetEngine.record() [local disk read+write]: mean=0.155ms median=0.118ms min=0.107ms max=0.452ms (n=200)
+SnapshotManager.create() [git stash create, clean tree]: mean=24.724ms median=24.476ms min=23.826ms max=26.321ms (n=20)
+```
+
+Two new measurements: `RiskBudgetEngine.record()` (a small JSON read + write per call, same shape of
+operation as `AuditStore.record()`'s append, and landing in the same sub-millisecond range) and
+`SnapshotManager.create()` (the one operation in this whole table that shells out to `git` — `git rev-parse
+HEAD` plus `git stash create` — and costs tens of milliseconds accordingly; it was measurable before this
+update but not previously wired into `benchmark_scaling`/`benchmark.py`'s `run_all()`). Every other number
+above is consistent with the 2026-09-18 run below within normal machine-load noise; none of `RiskEngine`,
+`PolicyEngine`, `ModelRouter`, or `AuditStore`'s own code changed in this update.
 
 ## 2026-09-18 — Apple M1 Pro, macOS (arm64), Python 3.13.7 (after the governance/runtime-safety upgrade)
 

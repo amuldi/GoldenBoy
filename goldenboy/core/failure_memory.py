@@ -28,12 +28,81 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from enum import Enum
+from typing import Dict, List, Optional, Tuple
 
 from goldenboy.core.errors import GoldenBoyError
 from goldenboy.core.redaction import redact_secrets
 
 FAILURE_MEMORY_SCHEMA_VERSION = 1
+
+
+class FailureCategory(Enum):
+    """A fixed, small vocabulary for *why* a task failed, independent of
+    the free-text `cause_summary`. Deterministic, keyword-pattern based
+    (see `classify_failure`) -- not a learned classifier, same "start with
+    a deterministic baseline" convention as `goldenboy.core.task_classifier`.
+    `UNKNOWN` is a real, expected outcome for causes that match no known
+    pattern, not an error state.
+    """
+
+    SYNTAX = "SYNTAX"
+    TEST_FAILURE = "TEST_FAILURE"
+    DEPENDENCY = "DEPENDENCY"
+    PERMISSION = "PERMISSION"
+    ENVIRONMENT = "ENVIRONMENT"
+    TIMEOUT = "TIMEOUT"
+    RESOURCE_LIMIT = "RESOURCE_LIMIT"
+    POLICY_DENIAL = "POLICY_DENIAL"
+    UNKNOWN = "UNKNOWN"
+
+
+# Ordered (pattern, category) pairs -- first match wins, so more specific
+# patterns are listed before more general ones that could otherwise shadow
+# them (e.g. POLICY_DENIAL's "denied"/"blocked" phrasing is checked before
+# the more generic PERMISSION category). Fixed, documented, and
+# overridable only by editing this list -- not user-configurable via a
+# JSON file, unlike PolicyConfig's patterns, because this is a
+# label-the-evidence heuristic, not an enforcement rule.
+def _compile_patterns() -> List[Tuple["re.Pattern[str]", FailureCategory]]:
+    raw: List[Tuple[str, FailureCategory]] = [
+        (r"\bsyntaxerror\b|\bindentationerror\b|invalid syntax|unexpected (indent|token|eof)|parse error",
+         FailureCategory.SYNTAX),
+        (r"denied by policy|policy[_ ]denial|blocked by policy|require[_ ]approval|policy check failed",
+         FailureCategory.POLICY_DENIAL),
+        (r"permissiondenied|permission denied|access denied|\beacces\b|\bforbidden\b|\b403\b|"
+         r"not authorized|unauthorized",
+         FailureCategory.PERMISSION),
+        (r"modulenotfounderror|importerror|no module named|package not found|cannot find module|"
+         r"unmet dependency|dependency conflict|could not resolve|resolution.*failed|version conflict",
+         FailureCategory.DEPENDENCY),
+        (r"\btimeout\b|timed out|deadline exceeded|connection timed out",
+         FailureCategory.TIMEOUT),
+        (r"out of memory|\boom\b|disk full|no space left|rate limit|quota exceeded|"
+         r"too many requests|\b429\b|memory limit exceeded",
+         FailureCategory.RESOURCE_LIMIT),
+        (r"assertionerror|assertion (error|failed)|test(s)? failed|expected .* got|"
+         r"\d+ failed,|failed:? \d+ test",
+         FailureCategory.TEST_FAILURE),
+        (r"command not found|no such file or directory|environment variable .* not set|"
+         r"is not installed|not found on path|missing environment",
+         FailureCategory.ENVIRONMENT),
+    ]
+    return [(re.compile(pattern, re.IGNORECASE), category) for pattern, category in raw]
+
+
+_CLASSIFICATION_PATTERNS = _compile_patterns()
+
+
+def classify_failure(cause_summary: str) -> FailureCategory:
+    """Deterministic, keyword-pattern classification of a failure cause
+    into a `FailureCategory`. Returns `FailureCategory.UNKNOWN` when no
+    pattern matches -- an honest "don't know", not a guess."""
+    for pattern, category in _CLASSIFICATION_PATTERNS:
+        if pattern.search(cause_summary):
+            return category
+    return FailureCategory.UNKNOWN
+
 
 _DIGIT_RUN = re.compile(r"\d+")
 _WHITESPACE_RUN = re.compile(r"\s+")
@@ -94,6 +163,9 @@ class FailureRecord:
     resolution: Optional[str] = None
     resolved: bool = False
     extra: Dict[str, object] = field(default_factory=dict)
+    # Defaulted so a record written before this field existed still loads
+    # cleanly via from_dict's .get() below -- UNKNOWN, not a missing field.
+    category: str = FailureCategory.UNKNOWN.value
 
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
@@ -111,6 +183,7 @@ class FailureRecord:
             resolution=data.get("resolution"),  # type: ignore[arg-type]
             resolved=data.get("resolved", False),  # type: ignore[arg-type]
             extra=data.get("extra", {}),  # type: ignore[arg-type]
+            category=data.get("category", FailureCategory.UNKNOWN.value),  # type: ignore[arg-type]
         )
 
 
@@ -158,10 +231,21 @@ class FailureMemoryStore:
         with open(self.state_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
-    def record(self, cause_summary: str, task_type: Optional[str] = None) -> FailureRecord:
+    def record(
+        self,
+        cause_summary: str,
+        task_type: Optional[str] = None,
+        category: Optional[FailureCategory] = None,
+    ) -> FailureRecord:
         """Record one failure occurrence. If a record with the same
         normalized signature already exists, increments its
-        `attempt_count` rather than creating a duplicate."""
+        `attempt_count` rather than creating a duplicate.
+
+        `category` is classified automatically from `cause_summary` via
+        `classify_failure` when not given explicitly. An existing record's
+        category is not re-classified on a repeat (it was set once, from
+        the first occurrence's cause text, which is what produced this
+        signature in the first place)."""
         safe_cause = redact_secrets(cause_summary)
         sig = _signature(safe_cause)
         records = self._load()
@@ -171,6 +255,7 @@ class FailureMemoryStore:
             records[sig].attempt_count += 1
             records[sig].last_seen = now
         else:
+            resolved_category = category if category is not None else classify_failure(safe_cause)
             records[sig] = FailureRecord(
                 schema_version=FAILURE_MEMORY_SCHEMA_VERSION,
                 signature=sig,
@@ -179,6 +264,7 @@ class FailureMemoryStore:
                 attempt_count=1,
                 first_seen=now,
                 last_seen=now,
+                category=resolved_category.value,
             )
 
         self._save(records)

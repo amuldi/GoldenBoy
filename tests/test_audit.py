@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from goldenboy.core.audit import AuditEntry, AuditStore
+from goldenboy.core.audit import AuditEntry, AuditStore, EventType
 
 
 def test_create_validates_result():
@@ -96,6 +96,42 @@ def test_redaction_survives_persist_and_reload(tmp_path):
 
     reloaded = store.load_events().events[0]
     assert "sk-ant-api03" not in reloaded.error
+
+
+# --- Execution trace -------------------------------------------------------
+
+
+def test_trace_returns_only_matching_task_id(tmp_path):
+    store = AuditStore(history_dir=str(tmp_path))
+    store.record(AuditEntry.create(action=EventType.TASK_STARTED, result="success", task_id="task-1"))
+    store.record(AuditEntry.create(action=EventType.POLICY_CHECKED, result="success", task_id="task-1"))
+    store.record(AuditEntry.create(action=EventType.TASK_STARTED, result="success", task_id="task-2"))
+
+    trace = store.trace("task-1")
+    assert len(trace) == 2
+    assert [e.action for e in trace] == [EventType.TASK_STARTED, EventType.POLICY_CHECKED]
+
+
+def test_trace_excludes_entries_without_task_id(tmp_path):
+    store = AuditStore(history_dir=str(tmp_path))
+    store.record(AuditEntry.create(action=EventType.TASK_STARTED, result="success"))
+    assert store.trace("task-1") == []
+
+
+def test_trace_unknown_task_id_returns_empty(tmp_path):
+    store = AuditStore(history_dir=str(tmp_path))
+    store.record(AuditEntry.create(action=EventType.TASK_STARTED, result="success", task_id="task-1"))
+    assert store.trace("doesnotexist") == []
+
+
+def test_event_type_constants_are_all_distinct_strings():
+    values = [
+        EventType.TASK_STARTED, EventType.ESTIMATE_CREATED, EventType.POLICY_CHECKED,
+        EventType.ACTION_ALLOWED, EventType.ACTION_EXECUTED, EventType.VERIFICATION_FAILED,
+        EventType.FAILURE_CLASSIFIED, EventType.RETRY_STARTED, EventType.RISK_ESCALATED,
+        EventType.APPROVAL_REQUIRED, EventType.ROLLBACK_STARTED, EventType.TASK_COMPLETED,
+    ]
+    assert len(values) == len(set(values))
 
 
 def test_render_includes_key_fields():

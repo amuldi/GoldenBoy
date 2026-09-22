@@ -19,13 +19,14 @@ from goldenboy.core.decision_engine import DecisionEngine
 from goldenboy.core.errors import GoldenBoyError
 from goldenboy.core.estimator import Estimator
 from goldenboy.core.executor import AdaptiveExecutor
-from goldenboy.core.failure_memory import FailureMemoryStore
+from goldenboy.core.failure_memory import FailureCategory, FailureMemoryStore
 from goldenboy.core.governance import ActionRequest, PolicyConfig, PolicyEngine, PolicyVerdict
 from goldenboy.core.heartbeat import check as heartbeat_check
 from goldenboy.core.history import HistoryStore
 from goldenboy.core.loop_detection import LoopDetector
 from goldenboy.core.priorities import ExecutionUnit, Priority
 from goldenboy.core.risk import ExecutionMode, RiskEngine
+from goldenboy.core.risk_budget import RiskBudgetConfig, RiskBudgetEngine, RiskBudgetError
 from goldenboy.core.router import ModelRouter, RouterConfig
 from goldenboy.core.snapshot import SnapshotError, SnapshotManager
 from goldenboy.core.spending import (
@@ -841,11 +842,22 @@ def failure_cmd(args):
         if not args.cause:
             print("error: 'failure record' requires --cause", file=sys.stderr)
             raise SystemExit(1)
-        record = store.record(args.cause, task_type=args.task_type)
+        category = None
+        if args.category:
+            try:
+                category = FailureCategory(args.category)
+            except ValueError:
+                valid = ", ".join(c.value for c in FailureCategory)
+                print(f"error: --category must be one of: {valid}", file=sys.stderr)
+                raise SystemExit(1)
+        record = store.record(args.cause, task_type=args.task_type, category=category)
         if args.json:
             print(json_module.dumps(record.to_dict(), indent=2))
         else:
-            print(f"Recorded (signature={record.signature}, attempt_count={record.attempt_count}).")
+            print(
+                f"Recorded (signature={record.signature}, attempt_count={record.attempt_count}, "
+                f"category={record.category})."
+            )
         return
 
     if args.action == "resolve":
@@ -872,7 +884,7 @@ def failure_cmd(args):
             return
         for r in records:
             status = "resolved" if r.resolved else "open"
-            print(f"{r.signature}  attempts={r.attempt_count}  [{status}]  {r.cause_summary}")
+            print(f"{r.signature}  attempts={r.attempt_count}  [{status}]  ({r.category})  {r.cause_summary}")
         return
 
     if args.action == "similar":
@@ -892,6 +904,77 @@ def failure_cmd(args):
                 f"[{s.similarity:.2f}] {s.record.signature}  "
                 f"attempts={s.record.attempt_count}  {s.record.cause_summary}"
             )
+
+
+def risk_cmd(args):
+    try:
+        config = RiskBudgetConfig.load(args.config_file) if args.config_file else RiskBudgetConfig.load()
+    except GoldenBoyError as e:
+        print(f"error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    engine = RiskBudgetEngine(config=config)
+
+    if args.action == "reset":
+        engine.reset()
+        if args.json:
+            print(json_module.dumps({"reset": True}, indent=2))
+        else:
+            print("Risk budget reset to initial value.")
+        return
+
+    if args.action == "status":
+        state = engine.status()
+        if args.json:
+            print(json_module.dumps(state.to_dict(), indent=2))
+            return
+        print(f"Remaining risk budget: {state.remaining:.1f} (of {config.initial_budget:.1f})")
+        print(f"Operations recorded:   {state.operations_recorded}")
+        print(f"Total deducted:        {state.total_deducted:.1f}")
+        if state.last_operation:
+            print(f"Last operation:        {state.last_operation} (at {state.last_updated})")
+        return
+
+    if args.action == "record":
+        if not args.operation:
+            print("error: 'risk record' requires --operation", file=sys.stderr)
+            raise SystemExit(1)
+        try:
+            result = engine.record(args.operation, repeat_count=args.repeat_count)
+        except (ValueError, RiskBudgetError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            raise SystemExit(1)
+
+        if args.json:
+            print(json_module.dumps(result.to_dict(), indent=2))
+        else:
+            print(f"Verdict:  {result.verdict.value.upper()}")
+            print(f"Weight:   -{result.weight_applied:.1f} (operation: {result.operation})")
+            print(f"Remaining: {result.remaining:.1f}")
+            print(f"Reason:   {result.reason}")
+
+        if result.verdict == PolicyVerdict.DENY:
+            raise SystemExit(1)
+        if result.verdict == PolicyVerdict.REQUIRE_APPROVAL:
+            raise SystemExit(2)
+
+
+def trace_cmd(args):
+    store = AuditStore()
+    entries = store.trace(args.task_id)
+
+    if args.json:
+        payload = {"task_id": args.task_id, "entries": [e.to_dict() for e in entries]}
+        print(json_module.dumps(payload, indent=2))
+        return
+
+    if not entries:
+        print(f"No audit entries recorded for task_id '{args.task_id}'.")
+        return
+    print(f"--- Execution Trace: '{args.task_id}' ({len(entries)} event(s)) ---")
+    for i, entry in enumerate(entries):
+        if i:
+            print()
+        print(entry.render())
 
 
 def heartbeat_cmd(args):
@@ -1150,7 +1233,38 @@ def build_parser() -> ArgumentParser:
     p_failure.add_argument(
         "--min-similarity", type=float, default=0.4, help="Threshold for 'similar' (0.0-1.0)"
     )
+    p_failure.add_argument(
+        "--category", type=str, default=None,
+        choices=[c.value for c in FailureCategory],
+        help="Override the auto-classified category for 'record' (default: classified from --cause)",
+    )
     p_failure.add_argument("--json", action="store_true")
+
+    p_risk = subparsers.add_parser(
+        "risk",
+        help="Risk Budget: cumulative point-based risk accounting, distinct from budget/policy "
+        "(record an operation, check status, or reset the session)",
+    )
+    p_risk.add_argument("action", choices=["record", "status", "reset"])
+    p_risk.add_argument("--operation", type=str, default=None, help="Required for 'record'")
+    p_risk.add_argument(
+        "--repeat-count", dest="repeat_count", type=int, default=1,
+        help="How many times this same signature has now occurred (e.g. from 'goldenboy loop record' "
+        "or a failure's attempt_count) -- repeats beyond the first cost extra, per config",
+    )
+    p_risk.add_argument(
+        "--config-file", dest="config_file", type=str, default=None,
+        help="Path to a risk-budget config JSON file (default: .goldenboy/risk_budget.json)",
+    )
+    p_risk.add_argument("--json", action="store_true")
+
+    p_trace = subparsers.add_parser(
+        "trace",
+        help="Execution Trace: every recorded Audit Log entry for one task, in order "
+        "(distinct from 'goldenboy audit', which shows recent entries unfiltered)",
+    )
+    p_trace.add_argument("task_id", type=str, help="The task_id to trace")
+    p_trace.add_argument("--json", action="store_true")
 
     p_heartbeat = subparsers.add_parser(
         "heartbeat",
@@ -1221,6 +1335,10 @@ def main():
             loop_cmd(args)
         elif args.command == "failure":
             failure_cmd(args)
+        elif args.command == "risk":
+            risk_cmd(args)
+        elif args.command == "trace":
+            trace_cmd(args)
         elif args.command == "heartbeat":
             heartbeat_cmd(args)
         else:

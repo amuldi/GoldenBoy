@@ -1,4 +1,6 @@
-from goldenboy.core.failure_memory import FailureMemoryStore
+import pytest
+
+from goldenboy.core.failure_memory import FailureCategory, FailureMemoryStore, classify_failure
 
 
 def test_record_creates_new_record(tmp_path):
@@ -81,3 +83,63 @@ def test_clear_removes_state_file(tmp_path):
     store.record("cause")
     store.clear()
     assert store.load_all() == []
+
+
+# --- Failure classification -----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cause,expected",
+    [
+        ("SyntaxError: invalid syntax on line 12", FailureCategory.SYNTAX),
+        ("AssertionError: expected 2 got 3, 1 failed, 4 passed", FailureCategory.TEST_FAILURE),
+        ("ModuleNotFoundError: No module named 'requests'", FailureCategory.DEPENDENCY),
+        ("PermissionError: Permission denied: '/etc/shadow'", FailureCategory.PERMISSION),
+        ("bash: foo: command not found", FailureCategory.ENVIRONMENT),
+        ("the operation timed out after 30s", FailureCategory.TIMEOUT),
+        ("429 Too Many Requests: rate limit exceeded", FailureCategory.RESOURCE_LIMIT),
+        ("request denied by policy: DANGEROUS_COMMAND", FailureCategory.POLICY_DENIAL),
+        ("the widget turned an unexpected shade of blue", FailureCategory.UNKNOWN),
+    ],
+)
+def test_classify_failure(cause, expected):
+    assert classify_failure(cause) == expected
+
+
+def test_record_auto_classifies_category(tmp_path):
+    store = FailureMemoryStore(state_dir=str(tmp_path))
+    record = store.record("ModuleNotFoundError: No module named 'foo'")
+    assert record.category == FailureCategory.DEPENDENCY.value
+
+
+def test_record_explicit_category_overrides_classifier(tmp_path):
+    store = FailureMemoryStore(state_dir=str(tmp_path))
+    record = store.record("some ambiguous cause", category=FailureCategory.ENVIRONMENT)
+    assert record.category == FailureCategory.ENVIRONMENT.value
+
+
+def test_repeat_record_keeps_original_category(tmp_path):
+    store = FailureMemoryStore(state_dir=str(tmp_path))
+    store.record("ModuleNotFoundError: No module named 'foo'", category=FailureCategory.ENVIRONMENT)
+    second = store.record("ModuleNotFoundError: No module named 'foo'")
+    assert second.category == FailureCategory.ENVIRONMENT.value
+
+
+def test_loading_record_without_category_field_defaults_to_unknown(tmp_path):
+    """Backward compatibility: a failures.json written before `category`
+    existed must still load cleanly."""
+    import json
+
+    state_file = tmp_path / "failures.json"
+    state_file.write_text(json.dumps({
+        "schema_version": 1,
+        "records": {
+            "abc123": {
+                "schema_version": 1, "signature": "abc123", "cause_summary": "old record",
+                "task_type": None, "attempt_count": 1, "first_seen": "t", "last_seen": "t",
+            }
+        },
+    }))
+    store = FailureMemoryStore(state_dir=str(tmp_path))
+    records = store.load_all()
+    assert records[0].category == FailureCategory.UNKNOWN.value

@@ -428,6 +428,109 @@ def test_snapshot_rollback_with_no_snapshots_errors(tmp_path, monkeypatch, capsy
 # --- heartbeat -----------------------------------------------------------
 
 
+# --- risk ------------------------------------------------------------------
+
+
+def test_risk_record_low_weight_allows(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _run(monkeypatch, ["risk", "record", "--operation", "read_file", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["verdict"] == "allow"
+
+
+def test_risk_record_requires_operation(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as exc_info:
+        _run(monkeypatch, ["risk", "record"])
+    assert exc_info.value.code == 1
+    assert "--operation" in capsys.readouterr().err
+
+
+def test_risk_record_crossing_deny_threshold_exits_one(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    config_file = tmp_path / "risk_budget.json"
+    config_file.write_text(json.dumps({
+        "initial_budget": 50.0, "approval_threshold": 40.0, "deny_threshold": 10.0,
+    }))
+    with pytest.raises(SystemExit) as exc_info:
+        _run(monkeypatch, [
+            "risk", "record", "--operation", "dangerous_operation",
+            "--config-file", str(config_file),
+        ])
+    assert exc_info.value.code == 1
+    assert "DENY" in capsys.readouterr().out
+
+
+def test_risk_record_crossing_approval_threshold_exits_two(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    config_file = tmp_path / "risk_budget.json"
+    config_file.write_text(json.dumps({
+        "initial_budget": 50.0, "approval_threshold": 40.0, "deny_threshold": 10.0,
+    }))
+    with pytest.raises(SystemExit) as exc_info:
+        _run(monkeypatch, [
+            "risk", "record", "--operation", "dependency_change",
+            "--config-file", str(config_file),
+        ])
+    assert exc_info.value.code == 2
+    assert "REQUIRE_APPROVAL" in capsys.readouterr().out
+
+
+def test_risk_status_then_reset(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _run(monkeypatch, ["risk", "record", "--operation", "shell_command"])
+    capsys.readouterr()
+    _run(monkeypatch, ["risk", "status", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["operations_recorded"] == 1
+
+    _run(monkeypatch, ["risk", "reset", "--json"])
+    capsys.readouterr()
+    _run(monkeypatch, ["risk", "status", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["operations_recorded"] == 0
+    assert payload["remaining"] == 100.0
+
+
+def test_risk_repeat_count_increases_deduction(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _run(monkeypatch, ["risk", "record", "--operation", "shell_command", "--repeat-count", "3", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["weight_applied"] > 8.0
+
+
+def test_risk_malformed_config_file_errors_cleanly(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    bad_config = tmp_path / "bad_risk.json"
+    bad_config.write_text("{not valid json")
+    with pytest.raises(SystemExit) as exc_info:
+        _run(monkeypatch, ["risk", "status", "--config-file", str(bad_config)])
+    assert exc_info.value.code == 1
+    assert "error:" in capsys.readouterr().err
+
+
+# --- trace -------------------------------------------------------------
+
+
+def test_trace_empty_says_none_recorded(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _run(monkeypatch, ["trace", "task-1"])
+    assert "No audit entries recorded" in capsys.readouterr().out
+
+
+def test_trace_shows_only_matching_task_events(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _run(monkeypatch, ["policy", "bash", "--command", "ls", "--audit", "--task-id", "task-1"])
+    capsys.readouterr()
+    _run(monkeypatch, ["policy", "bash", "--command", "ls", "--audit", "--task-id", "task-2"])
+    capsys.readouterr()
+
+    _run(monkeypatch, ["trace", "task-1", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["entries"]) == 1
+    assert payload["entries"][0]["task_id"] == "task-1"
+
+
 def test_heartbeat_reports_no_wake_when_nothing_changed(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     _run(monkeypatch, ["heartbeat", "--json"])

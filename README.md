@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://github.com/amuldi/GoldenBoy/actions/workflows/ci.yml/badge.svg" alt="CI status">
   <img src="https://img.shields.io/badge/python-3.9--3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.9–3.13">
-  <img src="https://img.shields.io/badge/coverage-94%25-2ea44f?style=flat-square" alt="Coverage 94%">
+  <img src="https://img.shields.io/badge/coverage-93%25-2ea44f?style=flat-square" alt="Coverage 93%">
   <img src="https://img.shields.io/badge/dependencies-zero-2ea44f?style=flat-square" alt="Zero required dependencies">
   <img src="https://img.shields.io/badge/TypeScript_SDK-node_%3E%3D18-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript SDK, Node >= 18">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT license"></a>
@@ -23,6 +23,7 @@
   <a href="#why-golden-boy">Why</a> &nbsp;&middot;&nbsp;
   <a href="#architecture">Architecture</a> &nbsp;&middot;&nbsp;
   <a href="#policy-engine">Policy Engine</a> &nbsp;&middot;&nbsp;
+  <a href="#risk-budget">Risk Budget</a> &nbsp;&middot;&nbsp;
   <a href="#model-routing">Model Routing</a> &nbsp;&middot;&nbsp;
   <a href="#checkpoint--recovery">Checkpoint &amp; Recovery</a> &nbsp;&middot;&nbsp;
   <a href="#loop-detection">Loop Detection</a> &nbsp;&middot;&nbsp;
@@ -34,12 +35,19 @@
   <a href="#roadmap">Roadmap</a>
 </p>
 
-> **Latest update (2026-09-18):** Golden Boy grows from a task-estimation tool into a governance layer —
+> **Latest update (2026-09-22):** Execution-intelligence layer on top of the governance runtime — a
+> cumulative, adaptive **Risk Budget** (`goldenboy risk`) distinct from the existing budget-ratio
+> `RiskEngine` and rule-based `PolicyEngine`; deterministic **failure classification**
+> (`FailureCategory` / `classify_failure`) on top of the existing Failure Memory; and an **Execution Trace**
+> (`goldenboy trace <task_id>`) plus a documented `EventType` vocabulary on top of the existing Audit Log.
+> All additive: every command, config default, and public API that existed before this update behaves
+> exactly as it did before. See [`CHANGELOG.md`](CHANGELOG.md) for the full, itemized change list.
+>
+> **Update (2026-09-18):** Golden Boy grew from a task-estimation tool into a governance layer —
 > **Policy Engine**, a session/day **budget ledger**, a **Model Router**, an **Audit Log**, git-based
-> **checkpoint/rollback**, **loop detection**, and **failure memory**. All additive: every command, config
-> default, and public API that existed before this update behaves exactly as it did before. See
+> **checkpoint/rollback**, **loop detection**, and **failure memory**. See
 > [Design Inspiration](#design-inspiration) for what this does and does not borrow from autonomous-agent
-> runtime research, and [`CHANGELOG.md`](CHANGELOG.md) for the full, itemized change list.
+> runtime research.
 
 ---
 
@@ -58,7 +66,7 @@ the working tree first so a bad change can be rolled back instead of merged.
 
 | | |
 |---|---|
-| ✅ **It does** | Classify a task, estimate its cost, track budget (as a percentage *and*, new in this update, as absolute session/day tokens), enforce policy (ALLOW / DENY / REQUIRE_APPROVAL) over tools/commands/paths/spend, route to a model tier, checkpoint and roll back working-tree changes via git, detect repeated failures, remember why past tasks failed, and log every governance decision to a local, human-readable audit trail. |
+| ✅ **It does** | Classify a task, estimate its cost, track budget (as a percentage and as absolute session/day tokens), enforce policy (ALLOW / DENY / REQUIRE_APPROVAL) over tools/commands/paths/spend, track a separate cumulative risk budget that only ever tightens within a session, route to a model tier, checkpoint and roll back working-tree changes via git, detect repeated failures, remember and classify why past tasks failed, and log every governance decision — plus a full per-task execution trace — to a local, human-readable audit trail. |
 | 🚫 **It doesn't** | Execute arbitrary coding work itself, decompose a task into a coding plan, replace the calling agent's judgment, run a server/daemon, use a database, call an LLM to make a policy decision, or implement anything resembling a wallet, cryptocurrency, agent marketplace, or agent-replication economy. See [Design Principles](#design-principles) and [Limitations](#limitations). |
 
 ---
@@ -93,11 +101,12 @@ free to ignore.
 | **Task Analyzer** | What kind of task is this, and how complex does it look? | `goldenboy.core.task_classifier`, `goldenboy.core.complexity` |
 | **Budget Engine** | What will this cost, what's left, and is the estimate the same thing as the actual? | `goldenboy.core.estimator`, `goldenboy.core.budget`, `goldenboy.core.spending` |
 | **Policy Engine** | Is this specific action allowed to run at all? | `goldenboy.core.governance` |
+| **Risk Budget** | How much risk has this session already spent, and does the running total now need approval or a stop? | `goldenboy.core.risk_budget` |
 | **Model Router** | Given the task's complexity and the budget's risk level, which capability tier fits? | `goldenboy.core.router` |
 | **Checkpoint / Recovery** | If this change breaks something, can we get back to before it? | `goldenboy.core.checkpoint` (task-plan), `goldenboy.core.snapshot` (working tree, git-based) |
 | **Loop Detection** | Is the agent retrying the same failing thing forever? | `goldenboy.core.loop_detection` |
-| **Failure Memory** | Has something like this failed before, and how was it resolved? | `goldenboy.core.failure_memory` |
-| **Audit Log** | What actually happened, when, and why? | `goldenboy.core.audit` |
+| **Failure Memory** | Has something like this failed before, how was it resolved, and what kind of failure was it? | `goldenboy.core.failure_memory` |
+| **Audit Log / Trace** | What actually happened, when, why, and what was one task's full story? | `goldenboy.core.audit` |
 
 Every row above is an independently usable Python class *and* a `goldenboy` CLI subcommand — see
 [CLI Usage](#cli-usage). None of them require the others to work.
@@ -114,16 +123,20 @@ flowchart TD
     C --> D
     E[("Budget + Spending Ledger<br/>session / day token tracking")] --> D
     D --> F{"Policy Engine<br/>permission → budget → risk → scope"}
-    F -- ALLOW --> G["Model Router<br/>complexity + risk → tier"]
+    F -- ALLOW --> Q{"Risk Budget<br/>cumulative session spend"}
     F -- DENY --> H["Blocked"]
     F -- REQUIRE_APPROVAL --> I["Held for human approval"]
+    Q -- ALLOW --> G["Model Router<br/>complexity + risk → tier"]
+    Q -- DENY --> H
+    Q -- REQUIRE_APPROVAL --> I
     G --> J["Agent executes the task<br/>(the calling agent's own code —<br/>Golden Boy does not execute work itself)"]
     J --> K["Snapshot verify<br/>typecheck / test / build"]
     K -- PASS --> L["Keep the change"]
     K -- FAIL --> M["Snapshot rollback<br/>(git checkout to pre-change state)"]
     J -- repeated failure --> N["Loop Detector"]
-    N -- threshold reached --> O["Stop + record in Failure Memory"]
-    F --> P[("Audit Log")]
+    N -- threshold reached --> O["Stop + record in Failure Memory<br/>(classified into a FailureCategory)"]
+    F --> P[("Audit Log<br/>goldenboy trace <task_id> replays one task's story")]
+    Q --> P
     K --> P
     N --> P
 ```
@@ -237,6 +250,63 @@ judgment call. See [Agent Safety](#agent-safety).
 
 ---
 
+## Risk Budget
+
+Three different, complementary things in this project answer a "how risky" question, and it's worth being
+precise about which one is which:
+
+| | Question it answers | Stateful? |
+|---|---|---|
+| `RiskEngine` (pre-existing) | Will *this task* exceed the token budget? (SAFE/CAUTION/LIMITED/CRITICAL from a budget ratio) | No — one calculation, no memory of past calls |
+| `PolicyEngine` | Is *this one action* itself allowed to run, right now? (rule/pattern matching) | No — stateless per call |
+| `RiskBudgetEngine` (new) | How much risk has *this session already spent*, across every action so far, and does that running total now need approval or a stop? | **Yes** — cumulative, persisted across calls |
+
+`goldenboy.core.risk_budget.RiskBudgetEngine` gives every recorded operation a configurable point cost and
+deducts it from a session-wide running total (`.goldenboy/risk_budget_state.json`). The deduction is
+monotonic — it only ever goes down, or is explicitly reset; nothing here restores budget on a success. That
+is deliberate: it's what makes permissions **adaptive** in the sense this project means — they tighten as
+risk accumulates within a session, and never loosen on their own.
+
+```mermaid
+stateDiagram-v2
+    [*] --> ALLOW: remaining > approval_threshold
+    ALLOW --> REQUIRE_APPROVAL: remaining <= approval_threshold
+    REQUIRE_APPROVAL --> DENY: remaining <= deny_threshold
+    DENY --> [*]: reset() starts a new session
+```
+
+```bash
+$ goldenboy risk record --operation shell_command
+Verdict:  ALLOW
+Weight:   -8.0 (operation: shell_command)
+Remaining: 92.0
+Reason:   Cumulative risk budget healthy (92.0 remaining).
+
+$ goldenboy risk record --operation dangerous_operation
+Verdict:  ALLOW
+Weight:   -40.0 (operation: dangerous_operation)
+Remaining: 52.0
+Reason:   Cumulative risk budget healthy (52.0 remaining).
+
+$ goldenboy risk record --operation dangerous_operation
+Verdict:  REQUIRE_APPROVAL
+Weight:   -40.0 (operation: dangerous_operation)
+Remaining: 12.0
+Reason:   Cumulative risk budget low (12.0 remaining, at or below approval threshold 40.0).
+```
+
+(Real, verified CLI output — a fresh session with default config, three calls in a row.) `--repeat-count`
+separately lets a caller feed in a signal it already has (e.g. `LoopDetector`'s count, or a
+`FailureRecord.attempt_count`) so retrying the same failing action costs extra beyond its base weight —
+without this module needing to know anything about loops or failures itself. Operation weights
+(`read_file: 1`, `modify_source: 3`, `shell_command: 8`, `dependency_change: 10`, `ci_configuration: 20`,
+`sensitive_path: 20`, `dangerous_operation: 40`, …) are this project's brief's example values, **not a
+validated risk model** — fully overridable via `.goldenboy/risk_budget.json`, same defaults → file →
+env-var cascade every other config in this project uses. `goldenboy risk record` exits `0`/`2`/`1` on
+ALLOW/REQUIRE_APPROVAL/DENY, same convention as `goldenboy policy`.
+
+---
+
 ## Model Routing
 
 `goldenboy.core.router.ModelRouter` maps two signals — task complexity (reused from `DecisionEngine`,
@@ -339,6 +409,19 @@ $ goldenboy failure similar --cause "connection timeout calling the billing API"
 [0.83] 3f1c9a2b1e4d5678  attempts=2  connection timeout while calling the payments API
 ```
 
+Every recorded failure is also classified into one of nine fixed `FailureCategory` values (`SYNTAX`,
+`TEST_FAILURE`, `DEPENDENCY`, `PERMISSION`, `ENVIRONMENT`, `TIMEOUT`, `RESOURCE_LIMIT`, `POLICY_DENIAL`,
+`UNKNOWN`) via `classify_failure` — a deterministic, keyword-pattern classifier, not a learned model, same
+"start with a deterministic baseline" convention `TaskClassifier` already uses. `UNKNOWN` is a real, honest
+outcome for a cause that matches no known pattern, not an error:
+
+```bash
+$ goldenboy failure record --cause "ModuleNotFoundError: No module named 'flask'"
+Recorded (signature=7348541657e4e8d1, attempt_count=1, category=DEPENDENCY).
+```
+
+Pass `--category` to `failure record` to override the classifier when you already know better.
+
 ---
 
 ## Auditability
@@ -362,6 +445,31 @@ through `goldenboy.core.redaction.redact_secrets` first — a pattern-based mask
 [Agent Safety](#agent-safety) and [`SECURITY.md`](SECURITY.md). Nothing here is a placeholder: `goldenboy
 audit --json` returns the same structured entries a dashboard or log aggregator would ingest, today, from a
 fresh install with no setup beyond running `goldenboy policy ... --audit`.
+
+`goldenboy audit` shows the most recent entries across every task, unfiltered — useful for "what just
+happened." `goldenboy trace <task_id>` answers a different question: "what was this *one task's* entire
+governance/execution story, in order?" — every recorded entry sharing that `task_id`, chronologically:
+
+```bash
+$ goldenboy policy bash --command "ls" --audit --task-id demo-task
+Verdict: ALLOW
+...
+$ goldenboy trace demo-task
+--- Execution Trace: 'demo-task' (1 event(s)) ---
+[03:00:10]
+TASK: demo-task
+ACTION: policy_check
+TOOL: bash
+POLICY: allow (ALLOWED)
+RESULT: success
+```
+
+`goldenboy.core.audit.EventType` names a suggested (not enforced) vocabulary spanning a task's full
+lifecycle — `TASK_STARTED`, `ESTIMATE_CREATED`, `POLICY_CHECKED`, `ACTION_ALLOWED`, `ACTION_EXECUTED`,
+`VERIFICATION_FAILED`, `FAILURE_CLASSIFIED`, `RETRY_STARTED`, `RISK_ESCALATED`, `APPROVAL_REQUIRED`,
+`ROLLBACK_STARTED`, `TASK_COMPLETED` — so a caller recording its own lifecycle events produces a trace
+that reads as one coherent story instead of ad hoc strings. `AuditEntry.action` stays a free-form string
+either way (existing writers, like `PolicyEngine`'s `"policy_check"`, are unaffected).
 
 ---
 
@@ -550,11 +658,18 @@ goldenboy doctor                                               # environment, co
 | `goldenboy spend <action>` | `record` / `status` / `reset-session` — session/day token-spend ledger. `--label`, `--estimated-tokens`, `--actual-tokens`, `--budget-limit`, `--window {session,daily,all}`, `--json`. |
 | `goldenboy snapshot <action>` | `create` / `verify` / `rollback` / `list` — git-based working-tree checkpoint. `--label`, `--check` (repeatable), `--rollback-on-fail`, `--id`, `--json`. |
 | `goldenboy loop <action>` | `record` / `status` / `reset` — repeated-failure detection. `--tool`, `--args`, `--error`, `--threshold`, `--json`. |
-| `goldenboy failure <action>` | `record` / `list` / `resolve` / `similar` — minimal failure memory. `--cause`, `--task-type`, `--signature`, `--resolution`, `--min-similarity`, `--json`. |
+| `goldenboy failure <action>` | `record` / `list` / `resolve` / `similar` — failure memory, auto-classified into a `FailureCategory`. `--cause`, `--task-type`, `--category` (override), `--signature`, `--resolution`, `--min-similarity`, `--json`. |
 | `goldenboy heartbeat` | **Experimental.** Cheap, local-only "does anything need attention" check. `--budget`, `--previous-budget`, `--json`. |
 
 Add `--budget` to any mock-budget command to control the starting budget, and `-v`/`--verbose` (before the
 subcommand) for the internal per-unit decision log.
+
+**Execution intelligence (new in this update):**
+
+| Command | Purpose |
+|---|---|
+| `goldenboy risk <action>` | `record` / `status` / `reset` — cumulative Risk Budget, `ALLOW`(exit 0) / `REQUIRE_APPROVAL`(exit 2) / `DENY`(exit 1). `--operation`, `--repeat-count`, `--config-file`, `--json`. |
+| `goldenboy trace <task_id>` | Every Audit Log entry for one task, in order — a single task's full governance/execution story. `--json`. |
 
 ---
 
@@ -591,6 +706,18 @@ explicit constructor arg  >  GOLDENBOY_* environment variable  >  .goldenboy/*.j
 
 **`RouterConfig`** (`.goldenboy/router.json`): `tier_models` — an optional `{tier: real-model-name}`
 mapping, empty by default (see [Model Routing](#model-routing)).
+
+**`RiskBudgetConfig`** (`.goldenboy/risk_budget.json` — note: distinct from the *state* file,
+`.goldenboy/risk_budget_state.json`; see [Risk Budget](#risk-budget)):
+
+| Field | Env var | Default | Meaning |
+|---|---|---|---|
+| `initial_budget` | `GOLDENBOY_RISK_BUDGET_INITIAL_BUDGET` | `100.0` | Risk budget a fresh session starts with, and what `reset()` returns to. |
+| `operation_weights` | *(file only)* | `read_file: 1`, `modify_source: 3`, `modify_many_files: 5`, `dependency_change: 10`, `shell_command: 8`, `ci_configuration: 20`, `sensitive_path: 20`, `dangerous_operation: 40` | Points deducted per occurrence of a named operation kind. |
+| `unknown_operation_weight` | `GOLDENBOY_RISK_BUDGET_UNKNOWN_OPERATION_WEIGHT` | `2.0` | Weight for an operation kind not in `operation_weights` — never free. |
+| `repeat_failure_penalty` | `GOLDENBOY_RISK_BUDGET_REPEAT_FAILURE_PENALTY` | `5.0` | Extra points per repeat beyond the first, when `--repeat-count > 1`. |
+| `approval_threshold` | `GOLDENBOY_RISK_BUDGET_APPROVAL_THRESHOLD` | `40.0` | Remaining budget at/below which `record()` returns `REQUIRE_APPROVAL`. |
+| `deny_threshold` | `GOLDENBOY_RISK_BUDGET_DENY_THRESHOLD` | `10.0` | Remaining budget at/below which `record()` returns `DENY`. |
 
 Out-of-range values, malformed JSON, invalid regex patterns, and unparseable `GOLDENBOY_*` env vars all
 raise a clear, typed error — never a stack trace.
@@ -707,7 +834,7 @@ precisely to keep a human in that loop, not to simulate one.
 ```
 goldenboy/
 ├── __init__.py              # small, deliberate public API
-├── cli.py                    # 20 subcommands — see CLI Usage above
+├── cli.py                    # 22 subcommands — see CLI Usage above
 ├── protocol.py                 # the Golden Boy Protocol -- GoldenBoyDecision schema + validation
 ├── integration.py               # budget_aware_execution decorator + history recording
 ├── adapters/
@@ -731,15 +858,16 @@ goldenboy/
 │   ├── telemetry.py                             # ExecutionTelemetry, TelemetryStore
 │   ├── calibration.py                            # estimated-vs-actual MAE/RMSE/bias
 │   ├── policies.py                                # baseline policies + GoldenBoyPolicy, for replay
-│   ├── governance.py            # NEW — Policy Engine (ALLOW/DENY/REQUIRE_APPROVAL)
-│   ├── spending.py               # NEW — session/day token-spend ledger
-│   ├── router.py                  # NEW — Model Router (complexity + risk → tier)
-│   ├── audit.py                    # NEW — Audit Log
-│   ├── redaction.py                 # NEW — secret redaction for audit/failure-memory free-text
-│   ├── snapshot.py                   # NEW — git-based working-tree checkpoint/verify/rollback
-│   ├── loop_detection.py              # NEW — repeated-failure detection
-│   ├── failure_memory.py               # NEW — minimal failure-cause memory
-│   ├── heartbeat.py                     # NEW — experimental cheap local "needs attention" check
+│   ├── governance.py            # Policy Engine (ALLOW/DENY/REQUIRE_APPROVAL)
+│   ├── spending.py               # session/day token-spend ledger
+│   ├── router.py                  # Model Router (complexity + risk → tier)
+│   ├── audit.py                    # Audit Log + EventType vocabulary + AuditStore.trace()
+│   ├── redaction.py                 # secret redaction for audit/failure-memory free-text
+│   ├── snapshot.py                   # git-based working-tree checkpoint/verify/rollback
+│   ├── loop_detection.py              # repeated-failure detection
+│   ├── failure_memory.py               # failure-cause memory + FailureCategory classification
+│   ├── risk_budget.py                   # NEW (2026-09-22) — cumulative Risk Budget, adaptive permission
+│   ├── heartbeat.py                     # experimental cheap local "needs attention" check
 │   ├── benchmark.py                      # shared benchmark implementation (CLI + scripts/benchmark.py)
 │   └── errors.py                          # GoldenBoyError and all typed subclasses
 ├── analytics/
@@ -783,10 +911,10 @@ npm run typecheck && npm run build && npm test
 
 ## Testing
 
-- **403 Python tests** (`pytest`), **94% line coverage** — up from 247 tests / 95% before this update; 156
-  new tests cover the nine new modules and their CLI commands (`tests/test_governance.py`,
-  `test_spending.py`, `test_router.py`, `test_audit.py`, `test_redaction.py`, `test_loop_detection.py`,
-  `test_failure_memory.py`, `test_snapshot.py`, `test_heartbeat.py`, `test_cli_governance.py`).
+- **448 Python tests** (`pytest`), **93% line coverage** — up from 403 tests / 94% before this update; 45
+  new tests cover `goldenboy.core.risk_budget` (new module), failure classification, and execution trace
+  (`tests/test_risk_budget.py`, plus additions to `test_failure_memory.py`, `test_audit.py`,
+  `test_cli_governance.py`, `test_public_api.py`, `test_benchmark.py`).
 - **21 TypeScript tests** (`sdk/typescript`, unaffected by this update), including real integration tests
   against the actual installed CLI — re-run and confirmed passing against this update's built wheel.
 - Ruff and mypy clean; `python -m build` produces an installable wheel whose every CLI command (old and
@@ -799,6 +927,16 @@ npm run typecheck && npm run build && npm test
   (asserted on the actual file bytes, not just a return code).
 - Audit: policy decisions recorded automatically when wired; secrets in `error`/`extra` fields redacted
   before the write, verified by reading the raw persisted file back, not just the in-memory object.
+- Risk Budget: cumulative deduction across calls; verdict crosses `ALLOW` → `REQUIRE_APPROVAL` → `DENY` at
+  the configured thresholds; `remaining` floors at 0, never negative; `--repeat-count` penalty applied
+  correctly; state persists across separate `RiskBudgetEngine` instances (same convention as
+  `LoopDetector`); a regression test asserts the config file and state file never collide on the same path.
+- Failure classification: each of the nine `FailureCategory` values matched against a representative real
+  error string; an explicit `--category` override beats the classifier; a record's category is not
+  re-classified on a repeat; a pre-existing `failures.json` written before `category` existed still loads
+  (defaults to `UNKNOWN`).
+- Execution Trace: `AuditStore.trace()` returns only entries matching a given `task_id`, in write order;
+  entries without a `task_id` are excluded; an unknown `task_id` returns an empty list, not an error.
 
 ---
 
@@ -810,18 +948,23 @@ yourself before relying on these numbers.
 
 | Operation | Mean | Median | n |
 |---|---|---|---|
-| `Estimator.estimate_task()` (warm, this repo) | 61.22ms | 60.54ms | 20 |
+| `Estimator.estimate_task()` (warm, this repo) | 63.22ms | 61.95ms | 20 |
 | `RiskEngine.assess()` | <0.001ms | <0.001ms | 1000 |
 | `PolicyEngine.evaluate()` | 0.007ms | 0.007ms | 200 |
 | `ModelRouter.route()` | 0.002ms | 0.002ms | 200 |
-| `AuditStore.record()` (local disk write) | 0.065ms | 0.056ms | 200 |
-| CLI cold start (`goldenboy status`) | 143.75ms | 142.52ms | 5 |
+| `AuditStore.record()` (local disk write) | 0.070ms | 0.055ms | 200 |
+| `RiskBudgetEngine.record()` (local disk read+write) | 0.149ms | 0.118ms | 200 |
+| `SnapshotManager.create()` (git stash create, clean tree) | 27.05ms | 26.56ms | 20 |
+| CLI cold start (`goldenboy status`) | 128.52ms | 128.42ms | 5 |
 
 `PolicyEngine`/`ModelRouter` are pure in-memory logic over already-known inputs — like `RiskEngine`, they're
-sub-microsecond-to-low-microsecond by construction, not a bottleneck. `AuditStore.record()` is the one new
-operation that touches disk (one JSONL line) and is still a fraction of a millisecond. Full methodology,
-the estimator/CLI-startup numbers' history, and an honest note on this run's machine load:
-[`BENCHMARKS.md`](BENCHMARKS.md).
+sub-microsecond-to-low-microsecond by construction, not a bottleneck. `AuditStore.record()` and
+`RiskBudgetEngine.record()` both touch disk (a JSONL append, and a small JSON read+write respectively) and
+stay a fraction of a millisecond. `SnapshotManager.create()` is the one governance-layer operation that
+shells out to `git` and costs tens of milliseconds accordingly — still negligible next to an actual agent
+turn (a network round-trip to an LLM provider is itself typically hundreds of milliseconds to seconds).
+Full methodology, the estimator/CLI-startup numbers' history, and an honest note on this run's machine
+load: [`BENCHMARKS.md`](BENCHMARKS.md).
 
 ---
 
@@ -880,6 +1023,17 @@ than an assumption.
   knowledge across machines or CI runs unless you deliberately sync that directory.
 - `failure_memory.find_similar()` is keyword-overlap (Jaccard) similarity, not semantic search — it will
   miss failures described in very different words even if the underlying cause is the same.
+- `classify_failure()` is a fixed, ordered set of regex patterns, not a trained model — a real failure
+  worded unusually will land in `UNKNOWN` rather than being force-fit into a wrong category; that's the
+  intended, honest failure mode, not a bug to route around with broader patterns.
+- Risk Budget operation weights (`read_file: 1`, `shell_command: 8`, `dangerous_operation: 40`, …) are the
+  project brief's example values, not a validated or calibrated risk model for any real project — override
+  them via `.goldenboy/risk_budget.json` based on your own incident history, not this project's defaults.
+  `RiskBudgetEngine` also has no visibility into what an agent actually does — like `LoopDetector`, it only
+  ever sees what a caller chooses to report via `record()`.
+- `goldenboy trace` only ever shows what was actually recorded to the Audit Log with a matching `task_id` —
+  it is not a general execution tracer and cannot reconstruct events a caller never wrote (e.g. via
+  `--audit` on `goldenboy policy`, or a custom `AuditEntry` using `EventType`'s vocabulary).
 - `goldenboy heartbeat` is **experimental**: a reasonable starting set of cheap local checks (pending
   checkpoint, exhausted/changed budget, a loop-detection stop), not a completeness guarantee, and
   explicitly not a background daemon — Golden Boy still does not run a server or scheduler of its own; a
@@ -896,7 +1050,11 @@ than an assumption.
 
 ## Roadmap
 
-**Shipped, tested, real (this update, 2026-09-18):** Policy Engine · session/day budget ledger · Model
+**Shipped, tested, real (this update, 2026-09-22):** cumulative, adaptive Risk Budget (`goldenboy risk`) ·
+deterministic failure classification (`FailureCategory`/`classify_failure`) · Execution Trace
+(`goldenboy trace`) + documented `EventType` vocabulary.
+
+**Shipped, tested, real (prior update, 2026-09-18):** Policy Engine · session/day budget ledger · Model
 Router · Audit Log · secret redaction · git-based snapshot/verify/rollback · loop detection · failure
 memory · Heartbeat (experimental).
 

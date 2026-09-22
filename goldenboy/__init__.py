@@ -18,7 +18,7 @@ from importlib.metadata import version as _version
 
 from goldenboy.adapters.base import ProviderAdapter
 from goldenboy.adapters.mock import MockProvider
-from goldenboy.core.audit import AuditEntry, AuditStore
+from goldenboy.core.audit import AuditEntry, AuditStore, EventType
 from goldenboy.core.budget import Budget, UsageConfidence
 from goldenboy.core.checkpoint import CheckpointManager
 from goldenboy.core.config import GoldenBoyConfig
@@ -32,7 +32,12 @@ from goldenboy.core.errors import (
 )
 from goldenboy.core.estimator import Estimator, TaskEstimate
 from goldenboy.core.executor import AdaptiveExecutor
-from goldenboy.core.failure_memory import FailureMemoryStore, FailureRecord
+from goldenboy.core.failure_memory import (
+    FailureCategory,
+    FailureMemoryStore,
+    FailureRecord,
+    classify_failure,
+)
 from goldenboy.core.governance import (
     ActionRequest,
     PolicyConfig,
@@ -53,6 +58,12 @@ from goldenboy.core.policies import (
 )
 from goldenboy.core.priorities import ExecutionUnit, Priority
 from goldenboy.core.risk import ExecutionMode, RiskEngine
+from goldenboy.core.risk_budget import (
+    RiskBudgetConfig,
+    RiskBudgetEngine,
+    RiskBudgetResult,
+    RiskBudgetState,
+)
 from goldenboy.core.router import ModelRouter, ModelTier, RouterConfig, RoutingDecision
 from goldenboy.core.snapshot import Snapshot, SnapshotManager, VerifyResult
 from goldenboy.core.spending import LedgerSummary, SessionMarker, SpendEntry, SpendingStore
@@ -139,6 +150,16 @@ __all__ = [
     # Failure memory
     "FailureMemoryStore",
     "FailureRecord",
+    "FailureCategory",
+    "classify_failure",
+    # Risk Budget (cumulative point-based risk accounting — distinct from
+    # RiskEngine's budget-ratio ExecutionMode above)
+    "RiskBudgetEngine",
+    "RiskBudgetConfig",
+    "RiskBudgetResult",
+    "RiskBudgetState",
+    # Execution Trace event vocabulary (see goldenboy.core.audit.EventType)
+    "EventType",
     # Heartbeat (experimental — see README.md)
     "HeartbeatResult",
     # Errors

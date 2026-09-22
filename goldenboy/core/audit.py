@@ -34,6 +34,35 @@ AUDIT_SCHEMA_VERSION = 1
 VALID_RESULTS = {"success", "failure", "blocked", "pending_approval", "skipped"}
 
 
+class EventType:
+    """A suggested, not enforced, vocabulary of `AuditEntry.action` values
+    spanning one task's execution lifecycle end-to-end (see the project
+    brief's "Execution Trace / Audit" section) -- estimate -> policy check
+    -> execution -> verification -> retry/escalation -> completion.
+
+    `action` on `AuditEntry` stays a free-form string, same as before
+    (`PolicyEngine` already records `"policy_check"`, matched here by
+    `POLICY_CHECKED`, unchanged for backward compatibility). These
+    constants exist so callers that want `goldenboy trace` to render a
+    coherent, ordered story use consistent names instead of each picking
+    their own -- not because a `goldenboy audit`/`AuditStore` write is
+    rejected for using a different one.
+    """
+
+    TASK_STARTED = "task_started"
+    ESTIMATE_CREATED = "estimate_created"
+    POLICY_CHECKED = "policy_check"
+    ACTION_ALLOWED = "action_allowed"
+    ACTION_EXECUTED = "action_executed"
+    VERIFICATION_FAILED = "verification_failed"
+    FAILURE_CLASSIFIED = "failure_classified"
+    RETRY_STARTED = "retry_started"
+    RISK_ESCALATED = "risk_escalated"
+    APPROVAL_REQUIRED = "approval_required"
+    ROLLBACK_STARTED = "rollback_started"
+    TASK_COMPLETED = "task_completed"
+
+
 class AuditError(GoldenBoyError):
     """The audit log could not be read (I/O failure) -- distinct from a
     single malformed line, which `load_events` reports as a count rather
@@ -208,6 +237,15 @@ class AuditStore:
                 corrupted += 1
 
         return AuditLoadResult(events=events, total_lines=len(lines), corrupted_lines=corrupted)
+
+    def trace(self, task_id: str) -> List[AuditEntry]:
+        """Every recorded entry for one `task_id`, in the order they were
+        written (the log is append-only, so file order is chronological
+        order) -- one task's full governance/execution story, distinct
+        from `load_events()`'s unfiltered, recency-limited view used by
+        `goldenboy audit`. Entries recorded without a `task_id` are never
+        included (there is nothing to match them to)."""
+        return [e for e in self.load_events().events if e.task_id == task_id]
 
     def clear(self) -> None:
         if os.path.exists(self.audit_file):
