@@ -5,7 +5,7 @@ from typing import Callable, Optional
 
 from anthropic import Anthropic
 
-from goldenboy.adapters.base import ProviderAdapter, confidence_for_age
+from goldenboy.adapters.base import GenerationResult, ProviderAdapter, confidence_for_age
 from goldenboy.core.budget import Budget, UsageConfidence
 from goldenboy.core.config import GoldenBoyConfig, get_default_config
 
@@ -15,6 +15,11 @@ logger = logging.getLogger("goldenboy.adapters.anthropic")
 # Pinned to a fast/cheap model since the response content is discarded;
 # only the rate-limit response headers are read.
 _PROBE_MODEL = "claude-haiku-4-5-20251001"
+
+# Anthropic's stop_reason values that mean the response was cut off before
+# the model naturally finished, as opposed to finishing normally ("end_turn"),
+# stopping on a configured stop sequence, or pausing for tool use.
+_TRUNCATED_STOP_REASONS = {"max_tokens"}
 
 
 class AnthropicAdapter(ProviderAdapter):
@@ -38,12 +43,15 @@ class AnthropicAdapter(ProviderAdapter):
     — refreshing costs a real (tiny) API call, so it's explicit.
     """
 
+    provider_name = "anthropic"
+
     def __init__(
         self,
         api_key: Optional[str] = None,
         safety_margin: Optional[float] = None,
         config: Optional[GoldenBoyConfig] = None,
         clock: Optional[Callable[[], float]] = None,
+        model: str = "claude-sonnet-4-5",
     ):
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
@@ -52,6 +60,9 @@ class AnthropicAdapter(ProviderAdapter):
         self.client = Anthropic(api_key=self.api_key)
         self._safety_margin_override = safety_margin
         self.config = config or get_default_config()
+        # The model this adapter generates with (distinct from _PROBE_MODEL,
+        # which is only ever used for the tiny rate-limit refresh call).
+        self.model: str = model
         # time.monotonic (not time.time): measuring elapsed duration, not
         # wall-clock position -- immune to system clock adjustments.
         # Overridable so tests can advance time deterministically instead
@@ -129,4 +140,51 @@ class AnthropicAdapter(ProviderAdapter):
             source="anthropic_rate_limit_headers",
             confidence=confidence_for_age(age, self.config.stale_after_seconds),
             **kwargs,
+        )
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        max_output_tokens: int,
+        reasoning_effort: Optional[str] = None,
+    ) -> GenerationResult:
+        """Make one real `messages.create` call to `self.model` and return
+        a normalized `GenerationResult`. Costs real tokens -- this is a
+        genuine generation call, not a probe."""
+        if reasoning_effort is not None:
+            logger.warning(
+                "reasoning_effort=%r was passed to AnthropicAdapter.generate() but "
+                "none of this adapter's registered models declare "
+                "supports_reasoning_effort=True; ignoring it.",
+                reasoning_effort,
+            )
+
+        start = self._clock()
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=max_output_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        latency_ms = (self._clock() - start) * 1000.0
+
+        # response.content is a union of many block types (text, tool-use,
+        # thinking, ...); only text blocks have a `.text` attribute, hence
+        # the getattr rather than a plain `block.text`.
+        text = "".join(
+            getattr(block, "text", "")
+            for block in response.content
+            if getattr(block, "type", None) == "text"
+        )
+        stop_reason = response.stop_reason or "unknown"
+        usage = response.usage
+        return GenerationResult(
+            text=text,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            stop_reason=stop_reason,
+            truncated=stop_reason in _TRUNCATED_STOP_REASONS,
+            latency_ms=latency_ms,
+            model=self.model,
+            provider=self.provider_name,
         )

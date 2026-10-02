@@ -23,6 +23,11 @@ def test_dunder_all_matches_documented_public_api():
         "budget_aware_execution",
         "ProviderAdapter",
         "MockProvider",
+        "GenerationResult",
+        "ModelRegistry",
+        "ModelSpec",
+        "ModelRegistryError",
+        "get_default_registry",
         "CheckpointManager",
         "TaskType",
         "TaskClassifier",
@@ -73,6 +78,10 @@ def test_dunder_all_matches_documented_public_api():
         "CheckpointError",
         "PolicyError",
         "SnapshotError",
+        "GoldenBoy",
+        "GoldenBoyRunResult",
+        "AttemptRecord",
+        "GoldenBoyRunError",
     }
     assert set(goldenboy.__all__) == expected
     for name in expected:

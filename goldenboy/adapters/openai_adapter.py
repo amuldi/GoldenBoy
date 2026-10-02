@@ -5,7 +5,7 @@ from typing import Callable, Optional
 
 from openai import OpenAI
 
-from goldenboy.adapters.base import ProviderAdapter, confidence_for_age
+from goldenboy.adapters.base import GenerationResult, ProviderAdapter, confidence_for_age
 from goldenboy.core.budget import Budget, UsageConfidence
 from goldenboy.core.config import GoldenBoyConfig, get_default_config
 
@@ -15,6 +15,11 @@ logger = logging.getLogger("goldenboy.adapters.openai")
 # Pinned to a cheap model since the response content is discarded; only
 # the rate-limit response headers are read.
 _PROBE_MODEL = "gpt-4o-mini"
+
+# OpenAI chat-completions finish_reason values that mean the response was
+# cut off before the model naturally finished, as opposed to finishing
+# normally ("stop") or pausing for tool calls ("tool_calls").
+_TRUNCATED_FINISH_REASONS = {"length"}
 
 
 class OpenAIAdapter(ProviderAdapter):
@@ -38,12 +43,15 @@ class OpenAIAdapter(ProviderAdapter):
     — refreshing costs a real (tiny) API call, so it's explicit.
     """
 
+    provider_name = "openai"
+
     def __init__(
         self,
         api_key: Optional[str] = None,
         safety_margin: Optional[float] = None,
         config: Optional[GoldenBoyConfig] = None,
         clock: Optional[Callable[[], float]] = None,
+        model: str = "gpt-4o",
     ):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
@@ -52,6 +60,9 @@ class OpenAIAdapter(ProviderAdapter):
         self.client = OpenAI(api_key=self.api_key)
         self._safety_margin_override = safety_margin
         self.config = config or get_default_config()
+        # The model this adapter generates with (distinct from _PROBE_MODEL,
+        # which is only ever used for the tiny rate-limit refresh call).
+        self.model: str = model
         # time.monotonic (not time.time): measuring elapsed duration, not
         # wall-clock position -- immune to system clock adjustments.
         # Overridable so tests can advance time deterministically instead
@@ -129,4 +140,51 @@ class OpenAIAdapter(ProviderAdapter):
             source="openai_rate_limit_headers",
             confidence=confidence_for_age(age, self.config.stale_after_seconds),
             **kwargs,
+        )
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        max_output_tokens: int,
+        reasoning_effort: Optional[str] = None,
+    ) -> GenerationResult:
+        """Make one real `chat.completions.create` call to `self.model`
+        and return a normalized `GenerationResult`. Costs real tokens --
+        this is a genuine generation call, not a probe."""
+        if reasoning_effort is not None:
+            logger.warning(
+                "reasoning_effort=%r was passed to OpenAIAdapter.generate() but "
+                "none of this adapter's registered models declare "
+                "supports_reasoning_effort=True; ignoring it.",
+                reasoning_effort,
+            )
+
+        start = self._clock()
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_output_tokens,
+        )
+        latency_ms = (self._clock() - start) * 1000.0
+
+        choice = response.choices[0]
+        finish_reason = choice.finish_reason or "unknown"
+        usage = response.usage
+        input_tokens = usage.prompt_tokens if usage is not None else 0
+        output_tokens = usage.completion_tokens if usage is not None else 0
+        if usage is None:
+            logger.warning(
+                "OpenAI generate() response did not include a `usage` block; "
+                "reporting 0 input/output tokens rather than guessing."
+            )
+        return GenerationResult(
+            text=choice.message.content or "",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=finish_reason,
+            truncated=finish_reason in _TRUNCATED_FINISH_REASONS,
+            latency_ms=latency_ms,
+            model=self.model,
+            provider=self.provider_name,
         )

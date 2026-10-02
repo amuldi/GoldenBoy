@@ -9,13 +9,18 @@ from dataclasses import asdict
 from goldenboy.adapters.mock import MockProvider
 from goldenboy.analytics import data_quality
 from goldenboy.analytics.engine import analyze as run_analytics
+from goldenboy.core.adaptive_router import (
+    AdaptiveModelRouter,
+    AdaptiveRouterConfig,
+    CapabilityRequirements,
+)
 from goldenboy.core.audit import AuditStore
 from goldenboy.core.benchmark import run_all as run_benchmark
 from goldenboy.core.budget import Budget
 from goldenboy.core.calibration import calibrate
 from goldenboy.core.checkpoint import CheckpointManager
 from goldenboy.core.config import GoldenBoyConfig
-from goldenboy.core.decision_engine import DecisionEngine
+from goldenboy.core.decision_engine import DecisionEngine, _complexity_label
 from goldenboy.core.errors import GoldenBoyError
 from goldenboy.core.estimator import Estimator
 from goldenboy.core.executor import AdaptiveExecutor
@@ -37,6 +42,7 @@ from goldenboy.core.spending import (
     filter_today,
     summarize,
 )
+from goldenboy.core.task_classifier import TaskClassifier
 from goldenboy.core.telemetry import (
     VALID_OUTCOMES,
     VALID_VERIFICATION_STATUSES,
@@ -659,6 +665,71 @@ def route_cmd(args):
     print(f"Reason:       {routing.reason}")
 
 
+def plan_route_cmd(args):
+    """Preview an `AdaptiveModelRouter` routing plan (Stage 2 -- real
+    `ModelRegistry` pricing, not the old provider-neutral `ModelTier`
+    router shown by `goldenboy route`). Read-only: never calls a provider,
+    never touches the Policy Engine or spending ledger."""
+    _require_nonblank_task(args.task, "plan-route")
+
+    classifier = TaskClassifier()
+    classification = classifier.classify(args.task)
+    task_type = args.task_type or classification.task_type.value
+
+    estimator = Estimator()
+    estimate = estimator.estimate_task(args.task)
+    complexity_label = _complexity_label(estimate.complexity_score)
+
+    try:
+        router_config = (
+            AdaptiveRouterConfig(strategy=args.strategy)
+            if args.strategy
+            else AdaptiveRouterConfig.load()
+        )
+    except GoldenBoyError as e:
+        print(f"error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    router = AdaptiveModelRouter(config=router_config)
+    capability_requirements = CapabilityRequirements(
+        requires_tools=args.requires_tools,
+        requires_vision=args.requires_vision,
+        requires_structured_output=args.requires_structured_output,
+    )
+    plan = router.route(
+        task_type=task_type,
+        complexity_label=complexity_label,
+        capability_requirements=capability_requirements,
+        min_quality=args.min_quality,
+        available_budget_usd=args.available_budget_usd,
+        estimated_input_tokens=estimate.prompt_tokens,
+        estimated_output_tokens=estimate.estimated_output_tokens,
+    )
+
+    if args.json:
+        print(json_module.dumps(plan.to_dict(), indent=2))
+        return
+
+    if not args.quiet:
+        print(f"--- Golden Boy Adaptive Routing Plan: '{_display_task(args.task)}' ---")
+    print(f"Task type:    {plan.task_type} (complexity: {plan.complexity})")
+    print(f"Strategy:     {router_config.strategy}")
+    model_note = (
+        f"{plan.provider}:{plan.model}" if plan.provider and plan.model else "(none -- see Reason)"
+    )
+    print(f"Model:        {model_note}")
+    print(f"Fits budget:  {plan.fits_budget}")
+    print(f"Token budget: {plan.input_budget_tokens} input / {plan.output_budget_tokens} output")
+    cost_note = f"${plan.estimated_cost:.6f}" if plan.estimated_cost is not None else "(n/a)"
+    print(f"Est. cost:    {cost_note}")
+    if plan.fallback_chain:
+        chain = " -> ".join(f"{p}:{m}" for p, m in plan.fallback_chain)
+        print(f"Fallbacks:    {chain}")
+    else:
+        print("Fallbacks:    (none)")
+    print(f"Reason:       {plan.reasoning}")
+
+
 def audit_cmd(args):
     store = AuditStore()
     result = store.load_events()
@@ -1163,6 +1234,35 @@ def build_parser() -> ArgumentParser:
     p_route.add_argument("--json", action="store_true")
     p_route.add_argument("--quiet", action="store_true", help="Suppress the header banner")
 
+    p_plan_route = subparsers.add_parser(
+        "plan-route",
+        help="Adaptive Model Router: preview a real RoutingPlan (provider, model, token "
+        "budget, estimated cost, fallback chain) from real ModelRegistry pricing -- "
+        "distinct from 'route', which previews the old provider-neutral ModelTier decision",
+    )
+    p_plan_route.add_argument("task", type=str, help="The task/prompt to route")
+    p_plan_route.add_argument(
+        "--available-budget-usd", type=float, default=1.0,
+        help="Caller-supplied USD budget for this task (default: 1.0)",
+    )
+    p_plan_route.add_argument(
+        "--task-type", type=str, default=None,
+        help="Override the auto-classified task type",
+    )
+    p_plan_route.add_argument(
+        "--strategy", type=str, default=None, choices=["cost_first", "quality_first", "adaptive"],
+        help="Override .goldenboy/adaptive_router.json's strategy for this call",
+    )
+    p_plan_route.add_argument(
+        "--min-quality", type=str, default="fast", choices=["fast", "balanced", "frontier"],
+        help="Minimum ModelSpec.quality_class required (default: fast)",
+    )
+    p_plan_route.add_argument("--requires-tools", action="store_true")
+    p_plan_route.add_argument("--requires-vision", action="store_true")
+    p_plan_route.add_argument("--requires-structured-output", action="store_true")
+    p_plan_route.add_argument("--json", action="store_true")
+    p_plan_route.add_argument("--quiet", action="store_true", help="Suppress the header banner")
+
     p_audit = subparsers.add_parser("audit", help="Show recent Audit Log entries")
     p_audit.add_argument("--limit", type=int, default=20, help="Show at most this many recent entries")
     p_audit.add_argument("--json", action="store_true")
@@ -1325,6 +1425,8 @@ def main():
             policy_cmd(args)
         elif args.command == "route":
             route_cmd(args)
+        elif args.command == "plan-route":
+            plan_route_cmd(args)
         elif args.command == "audit":
             audit_cmd(args)
         elif args.command == "spend":

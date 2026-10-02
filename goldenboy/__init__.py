@@ -16,7 +16,7 @@ Import them explicitly when you need them:
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _version
 
-from goldenboy.adapters.base import ProviderAdapter
+from goldenboy.adapters.base import GenerationResult, ProviderAdapter
 from goldenboy.adapters.mock import MockProvider
 from goldenboy.core.audit import AuditEntry, AuditStore, EventType
 from goldenboy.core.budget import Budget, UsageConfidence
@@ -48,6 +48,12 @@ from goldenboy.core.governance import (
 from goldenboy.core.heartbeat import HeartbeatResult
 from goldenboy.core.history import HistoryStore, TaskEvent
 from goldenboy.core.loop_detection import LoopCheckResult, LoopDetector
+from goldenboy.core.model_registry import (
+    ModelRegistry,
+    ModelRegistryError,
+    ModelSpec,
+    get_default_registry,
+)
 from goldenboy.core.policies import (
     ComplexityOnlyPolicy,
     FixedThresholdPolicy,
@@ -69,6 +75,7 @@ from goldenboy.core.snapshot import Snapshot, SnapshotManager, VerifyResult
 from goldenboy.core.spending import LedgerSummary, SessionMarker, SpendEntry, SpendingStore
 from goldenboy.core.task_classifier import TaskClassifier
 from goldenboy.core.task_types import DecisionAction, TaskType
+from goldenboy.goldenboy import AttemptRecord, GoldenBoy, GoldenBoyRunError, GoldenBoyRunResult
 from goldenboy.integration import budget_aware_execution
 from goldenboy.protocol import GoldenBoyDecision, ProtocolError
 
@@ -99,6 +106,12 @@ __all__ = [
     # Adapters (provider-specific ones live in their own submodules — see above)
     "ProviderAdapter",
     "MockProvider",
+    "GenerationResult",
+    # Model Registry
+    "ModelRegistry",
+    "ModelSpec",
+    "ModelRegistryError",
+    "get_default_registry",
     # Persistence
     "CheckpointManager",
     # Task intelligence
@@ -168,4 +181,9 @@ __all__ = [
     "CheckpointError",
     "PolicyError",
     "SnapshotError",
+    # Public API facade (Stage 4)
+    "GoldenBoy",
+    "GoldenBoyRunResult",
+    "AttemptRecord",
+    "GoldenBoyRunError",
 ]

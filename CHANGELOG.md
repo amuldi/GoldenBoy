@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file, using the
 
 ## [Unreleased]
 
+### Adaptive LLM Execution Layer: Model Registry, Adaptive Router, token optimization, result evaluation, escalation, `GoldenBoy` facade (2026-10-02)
+
+Five stages, additive, no regressions (403 -> 545 tests; pre-upgrade count held throughout).
+
+#### Added
+
+- **Model Registry** (`goldenboy/core/model_registry.py`): `ModelSpec`/`ModelRegistry`, 5 real models
+  (anthropic:claude-opus-4-1, anthropic:claude-sonnet-4-5, anthropic:claude-haiku-4-5, openai:gpt-4o,
+  openai:gpt-4o-mini) with published pricing and context-window figures; overridable/extendable via
+  `.goldenboy/models.json`. `ProviderAdapter.generate()` real-call method and `GenerationResult` added to
+  `goldenboy/adapters/base.py`; implemented on `AnthropicAdapter`, `OpenAIAdapter`, and `MockProvider`.
+- **Adaptive Model Router** (`goldenboy/core/adaptive_router.py`): `AdaptiveModelRouter`/`RoutingPlan`,
+  three strategies (`cost_first`/`quality_first`/`adaptive`), config via `.goldenboy/adaptive_router.json`.
+  **Token Optimizer** (`goldenboy/core/token_optimizer.py`): dedup, priority truncation, output-budget
+  sizing, truncation classification.
+- **Result Evaluator** (`goldenboy/core/result_evaluator.py`): 4 deterministic evaluators (JSON schema
+  subset, required fields, truncation, exit status). **Escalation** (`goldenboy/core/escalation.py`): pure
+  `suggest_escalation()`, no orchestrator/loop.
+- **`GoldenBoy` facade** (`goldenboy/goldenboy.py`): `.run()` implementing classify -> route -> policy-gate
+  -> generate -> record spend -> evaluate -> escalate-if-needed -> return, as one bounded, audit-logged
+  loop. New `goldenboy plan-route` CLI subcommand previewing a `RoutingPlan`.
+- **Benchmark** (`scripts/benchmark_adaptive_routing.py`,
+  `benchmarks/results/2026-10-02-adaptive-routing.md`): adaptive routing vs. a pinned-frontier-model
+  baseline across 6 tasks/3 complexity tiers under `MockProvider` (no API keys available in that
+  environment) — 86.2% lower projected cost under adaptive, a real function of real pricing × real token
+  counts; quality was not and could not be measured under a mock provider; escalation did not fire in this
+  run for a documented structural reason (`Estimator` always sizes output budget >= 1.5x prompt tokens).
+
 ### Execution intelligence: Risk Budget, failure classification, execution trace (2026-09-22)
 
 An additive follow-on to the 2026-09-18 governance update below. Before writing any code, the existing

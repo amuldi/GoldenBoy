@@ -94,7 +94,23 @@ Progress** · **Planned** (agreed direction, not started) · **Research**
 | Execution Trace (`goldenboy.core.audit.EventType` vocabulary + `AuditStore.trace()`) | Done (2026-09-22) — `goldenboy trace <task_id>` CLI command; reuses the existing Audit Log rather than a new store |
 | A "verification loop" orchestrator tying PLAN→EXECUTE→TEST→DIAGNOSE→RETRY together in one class | Explicit non-goal — would be exactly the "one giant orchestration class" the 2026-09-22 brief itself warns against; `SnapshotManager.verify()`, `classify_failure()`, and `LoopDetector` are already independently composable by a caller |
 | A separate "execution memory" store for successful-recovery patterns | Explicit non-goal — `FailureMemoryStore.resolve()` already records what fixed a given failure signature; a parallel store would duplicate the same information |
-| Deep automatic wiring of the Policy Engine/Audit Log into `AdaptiveExecutor`/`budget_aware_execution` | Explicit non-goal for now — both remain independently composable (their own CLI command, their own Python API) rather than a new mandatory pipeline forced through already-stable, already-tested code. Revisit if real usage shows the composition burden is worth the coupling risk. |
+| Deep automatic wiring of the Policy Engine/Audit Log into `AdaptiveExecutor`/`budget_aware_execution` | Explicit non-goal for now — both remain independently composable (their own CLI command, their own Python API) rather than a new mandatory pipeline forced through already-stable, already-tested code. Revisit if real usage shows the composition burden is worth the coupling risk. **Partially addressed (2026-10-02), without changing this non-goal:** `GoldenBoy.run()` (`goldenboy/goldenboy.py`) now composes the Policy Engine, Audit Log, Adaptive Model Router, token optimizer, result evaluator, and escalation into one explicit, opt-in, caller-visible sequence — a human-readable top-level facade a caller chooses to use, not auto-wiring inside `AdaptiveExecutor`/`budget_aware_execution` themselves, which remain exactly as independently composable and unmodified as before. |
+
+## Adaptive LLM Execution Layer (2026-10-02)
+
+| Item | Status |
+|---|---|
+| Multi-provider model registry with real cost/capability metadata | Done — `goldenboy/core/model_registry.py` (`ModelSpec`/`ModelRegistry`), 5 real models (3 Anthropic, 2 OpenAI), overridable via `.goldenboy/models.json` |
+| Adaptive model routing under a real USD budget | Done — `goldenboy/core/adaptive_router.py` (`AdaptiveModelRouter`/`RoutingPlan`), 3 strategies (`cost_first`/`quality_first`/`adaptive`); `goldenboy plan-route` CLI command |
+| Token optimization (dedup, priority truncation, output-budget sizing, truncation detection) | Done — `goldenboy/core/token_optimizer.py` |
+| Deterministic result evaluation (schema subset / required fields / truncation / exit status) | Done — `goldenboy/core/result_evaluator.py` |
+| Escalation suggestions (pure, no orchestrator) | Done — `goldenboy/core/escalation.py` (`suggest_escalation()`) |
+| `GoldenBoy` public facade composing the above into one bounded, audited run | Done — `goldenboy/goldenboy.py`; see non-goals reconciliation above |
+| Real `generate()` on provider adapters | Done — `goldenboy/adapters/base.py` (`ProviderAdapter.generate()`/`GenerationResult`), implemented on `AnthropicAdapter`, `OpenAIAdapter`, `MockProvider` |
+| Per-model escalation within a single provider adapter instance | Not built — `ProviderAdapter.generate()` binds one adapter instance to one configured model (`self.model`); true per-model escalation within one provider would need a different adapter-instantiation model, not built this stage |
+| LLM-as-judge result evaluation | Deliberately not built this stage — see `goldenboy/core/result_evaluator.py`'s module docstring; the 4 deterministic evaluators cover the cases that don't need one |
+| YAML config for the Adaptive LLM Execution Layer's own config files (`adaptive_router.json`, `models.json`) | Not added — kept JSON, consistent with the zero-required-runtime-dependency principle this project otherwise holds; a literal reading of an earlier spec draft suggesting YAML was not followed |
+| Real-provider (non-mock) benchmark of the adaptive routing strategy, with escalation actually triggering end-to-end | Blocked on real API keys being available in a benchmarking environment — see `benchmarks/results/2026-10-02-adaptive-routing.md`'s honesty note |
 
 ## Explicit non-goals (for now)
 

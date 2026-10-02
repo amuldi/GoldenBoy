@@ -21,6 +21,7 @@
 <p align="center">
   <a href="#overview">Overview</a> &nbsp;&middot;&nbsp;
   <a href="#why-golden-boy">Why</a> &nbsp;&middot;&nbsp;
+  <a href="#adaptive-llm-execution-layer">Adaptive LLM Execution Layer</a> &nbsp;&middot;&nbsp;
   <a href="#architecture">Architecture</a> &nbsp;&middot;&nbsp;
   <a href="#policy-engine">Policy Engine</a> &nbsp;&middot;&nbsp;
   <a href="#risk-budget">Risk Budget</a> &nbsp;&middot;&nbsp;
@@ -35,7 +36,13 @@
   <a href="#roadmap">Roadmap</a>
 </p>
 
-> **Latest update (2026-09-22):** Execution-intelligence layer on top of the governance runtime — a
+> **Latest update (2026-10-02):** an **Adaptive LLM Execution Layer** — a real, priced **Model Registry**,
+> an **Adaptive Model Router** (3 strategies), deterministic **token optimization** and **result
+> evaluation**, pure **escalation** suggestions, and a new `GoldenBoy` facade class/`plan-route` CLI command
+> composing them into one explicit, bounded, audited run. See [Adaptive LLM Execution Layer](#adaptive-llm-execution-layer)
+> below and [CHANGELOG.md](CHANGELOG.md) for the full change list.
+>
+> **Prior update (2026-09-22):** Execution-intelligence layer on top of the governance runtime — a
 > cumulative, adaptive **Risk Budget** (`goldenboy risk`) distinct from the existing budget-ratio
 > `RiskEngine` and rule-based `PolicyEngine`; deterministic **failure classification**
 > (`FailureCategory` / `classify_failure`) on top of the existing Failure Memory; and an **Execution Trace**
@@ -66,7 +73,7 @@ the working tree first so a bad change can be rolled back instead of merged.
 
 | | |
 |---|---|
-| ✅ **It does** | Classify a task, estimate its cost, track budget (as a percentage and as absolute session/day tokens), enforce policy (ALLOW / DENY / REQUIRE_APPROVAL) over tools/commands/paths/spend, track a separate cumulative risk budget that only ever tightens within a session, route to a model tier, checkpoint and roll back working-tree changes via git, detect repeated failures, remember and classify why past tasks failed, and log every governance decision — plus a full per-task execution trace — to a local, human-readable audit trail. |
+| ✅ **It does** | Classify a task, estimate its cost, track budget (as a percentage and as absolute session/day tokens), enforce policy (ALLOW / DENY / REQUIRE_APPROVAL) over tools/commands/paths/spend, track a separate cumulative risk budget that only ever tightens within a session, route to a provider-neutral model tier *or* a real, priced model via the Adaptive Model Router, make a real `generate()` call and evaluate/escalate its result through the `GoldenBoy` facade, checkpoint and roll back working-tree changes via git, detect repeated failures, remember and classify why past tasks failed, and log every governance decision — plus a full per-task execution trace — to a local, human-readable audit trail. |
 | 🚫 **It doesn't** | Execute arbitrary coding work itself, decompose a task into a coding plan, replace the calling agent's judgment, run a server/daemon, use a database, call an LLM to make a policy decision, or implement anything resembling a wallet, cryptocurrency, agent marketplace, or agent-replication economy. See [Design Principles](#design-principles) and [Limitations](#limitations). |
 
 ---
@@ -110,6 +117,188 @@ free to ignore.
 
 Every row above is an independently usable Python class *and* a `goldenboy` CLI subcommand — see
 [CLI Usage](#cli-usage). None of them require the others to work.
+
+---
+
+## Adaptive LLM Execution Layer
+
+> **Latest update (2026-10-02):** a real, priced **Model Registry** (5 real Anthropic/OpenAI models,
+> published pricing and context windows — not placeholders), an **Adaptive Model Router** that picks a
+> model under a real USD budget with 3 real strategies, deterministic **token optimization** (dedup,
+> priority truncation, output-budget sizing, truncation detection), deterministic **result evaluation**
+> (schema/fields/truncation/exit-status), pure **escalation suggestions**, and a new `GoldenBoy` facade
+> class that composes all of the above into one explicit, audited, bounded retry loop. See
+> [CHANGELOG.md](CHANGELOG.md) for the itemized change list and
+> [benchmarks/results/2026-10-02-adaptive-routing.md](benchmarks/results/2026-10-02-adaptive-routing.md)
+> for real measured numbers.
+
+Like every other row in [Core Concepts](#core-concepts), these are narrow, independently usable building
+blocks — not a hidden pipeline. The only place a retry loop is allowed to live in this codebase is inside
+`GoldenBoy.run()` itself (a plain, bounded `for` loop, documented in that module's docstring); every piece
+it calls remains callable on its own with no orchestrator wrapping it.
+
+| Building block | What it answers | Module |
+|---|---|---|
+| **Model Registry** | What models can we actually call, and what do they really cost/support? | `goldenboy.core.model_registry` |
+| **Adaptive Model Router** | Given a task, a budget, and a strategy, which real model should handle it? | `goldenboy.core.adaptive_router` |
+| **Token Optimizer** | How do we fit context into a budget, and size an output budget that won't get wastefully truncated? | `goldenboy.core.token_optimizer` |
+| **Result Evaluator** | Did this generation actually satisfy the caller's requirements? | `goldenboy.core.result_evaluator` |
+| **Escalation** | If not, what's the one next thing to try? | `goldenboy.core.escalation` |
+| **`GoldenBoy` facade** | The one sanctioned caller that composes all of the above into a governed, audited run | `goldenboy.goldenboy` |
+
+### Model Registry
+
+`ModelRegistry` ships with exactly the models whose pricing and context-window figures this project is
+confident are accurate, pulled from Anthropic's and OpenAI's own published pricing pages — a deliberately
+short, conservative list rather than an exhaustive or guessed one. Today that's:
+
+| Provider | Model | Context window | Max output | Input $/1K | Output $/1K | Quality class |
+|---|---|---|---|---|---|---|
+| anthropic | claude-opus-4-1 | 200,000 | 32,000 | $0.015 | $0.075 | frontier |
+| anthropic | claude-sonnet-4-5 | 200,000 | 64,000 | $0.003 | $0.015 | balanced |
+| anthropic | claude-haiku-4-5 | 200,000 | 64,000 | $0.001 | $0.005 | fast |
+| openai | gpt-4o | 128,000 | 16,384 | $0.0025 | $0.01 | balanced |
+| openai | gpt-4o-mini | 128,000 | 16,384 | $0.00015 | $0.0006 | fast |
+
+A model missing a confidently-known figure is left out entirely rather than populated with a guess (see
+`model_registry.py`'s module docstring). Add or override entries via `.goldenboy/models.json` (same
+defaults → file cascade every other Golden Boy config uses) without touching source — this is also how you
+register metadata for `MockProvider` or any other provider key you use, since `get_default_registry()`
+itself only has the Anthropic/OpenAI rows above.
+
+### Adaptive Model Router
+
+`AdaptiveModelRouter.route()` picks the cheapest/strongest real model (by `ModelRegistry`) that satisfies a
+caller's capability requirements (`requires_tools`/`requires_vision`/`requires_structured_output`) and
+minimum quality class, under a caller-supplied USD budget — never a percentage abstraction, never a guess.
+Three real, implemented strategies (`.goldenboy/adaptive_router.json`'s `strategy`, or `--strategy` on the
+CLI):
+
+- **`cost_first`** — cheapest qualifying model under budget.
+- **`quality_first`** — highest quality_class qualifying model under budget, cost as the tiebreaker.
+- **`adaptive`** — `quality_first` once task complexity is `HIGH`/`VERY_HIGH`, `cost_first` below that
+  threshold. This is the strategy the Stage 5 benchmark below exercises.
+
+The returned `RoutingPlan` always carries `provider`/`model` (both `None`, honestly, if nothing qualifies),
+a human-readable `reasoning` string, the real estimated cost, and a `fallback_chain` of every other
+qualifying model — real registry entries, never invented ones.
+
+### Token Optimization
+
+`goldenboy.core.token_optimizer` is pure, deterministic, no-LLM-involved context/output-sizing logic:
+`remove_duplicate_chunks()` drops exact-duplicate context chunks; `truncate_to_budget()` greedily keeps the
+highest-priority chunks that fit a token budget; `compute_output_budget_tokens()` sizes an output budget as
+a documented fraction of a model's real `max_output_tokens`, scaled by task complexity; and
+`classify_truncation()` turns a `GenerationResult.truncated` flag (itself derived honestly from the
+provider's own stop/finish reason) into a named condition the escalation logic below reacts to.
+
+### Result Evaluation
+
+`goldenboy.core.result_evaluator` is four independent, composable checks, each returning a shared
+`EvaluationResult` with concrete evidence, never a bare boolean: `evaluate_json_schema()` (a small,
+dependency-free structural subset of JSON Schema — required fields + top-level type matching, not full JSON
+Schema), `evaluate_required_fields()` (plain substring presence), `evaluate_truncation()`, and
+`evaluate_exit_status()`. There is no god-function that runs "all the checks" — a caller composes whichever
+ones are relevant to its own task. LLM-as-judge evaluation is deliberately not built this stage (see
+[ROADMAP.md](ROADMAP.md)).
+
+### Escalation
+
+`suggest_escalation()` is a pure function: given why the last attempt was judged insufficient, the current
+`RoutingPlan`, and an attempt/max-attempts count, it returns **one** suggested next step
+(`INCREASE_OUTPUT_BUDGET`, `ESCALATE_MODEL`, `FALLBACK_PROVIDER`, `STOP_BUDGET_EXHAUSTED`, or
+`STOP_MAX_ATTEMPTS`) — it never executes anything, never loops, and never calls a provider itself. The one
+non-negotiable safety invariant (no infinite retry) is enforced inside this pure function: once
+`attempt_count >= max_attempts` it always returns `STOP_MAX_ATTEMPTS`, regardless of reason.
+
+### The `GoldenBoy` facade
+
+`GoldenBoy.run()` is the one place in this codebase a retry loop is allowed to live — a plain, bounded `for`
+loop over an already-existing sequence (classify → route → policy-gate → generate → record spend → evaluate
+→ escalate-if-insufficient → retry), with every step written to the Audit Log as it happens. A caller that
+doesn't want this sequencing can keep calling the pieces above directly, exactly as before.
+
+#### Python API — runnable without any API key
+
+This example uses `MockProvider` (no network, no API key) and a tiny caller-supplied `ModelRegistry` entry
+for it — `get_default_registry()` only ships real, priced Anthropic/OpenAI rows, so a non-Anthropic/OpenAI
+adapter needs its own registry entry, same as any provider you add yourself via `.goldenboy/models.json`.
+This was actually executed against this repo's current code to confirm it runs as written:
+
+```python
+from goldenboy import GoldenBoy, MockProvider, ModelRegistry, ModelSpec
+
+registry = ModelRegistry(specs={
+    "mock:mock-model": ModelSpec(
+        provider="mock", model="mock-model",
+        context_window=128_000, max_output_tokens=4096,
+        input_cost_per_1k=0.001, output_cost_per_1k=0.002,
+        supports_reasoning_effort=False, supports_tools=False,
+        supports_vision=False, supports_structured_output=False,
+        quality_class="fast", latency_class="low",
+    )
+})
+
+gb = GoldenBoy(adapters={"mock": MockProvider()}, registry=registry)
+result = gb.run(
+    "Summarize the key risks of this deployment plan.",
+    available_budget_usd=1.0,
+)
+print(result.sufficient)                 # True
+print(result.text)                       # "mock response to: Summarize the key risks..."
+print(result.total_cost_usd)              # real cost under the registry entry above
+print(result.final_routing_plan.provider, result.final_routing_plan.model)  # mock mock-model
+```
+
+With real `AnthropicAdapter`/`OpenAIAdapter` instances instead of `MockProvider` (and no custom registry —
+the real registry already covers both), the same `gb.run(...)` call routes to a real priced model, makes a
+real `generate()` call, records real spend, and escalates/retries exactly the same way.
+
+#### CLI: `plan-route`
+
+`plan-route` previews a real `AdaptiveModelRouter` decision — read-only, never calls a provider, never
+touches the Policy Engine or spending ledger. Real output captured from this repo:
+
+```
+$ goldenboy plan-route "Implement a rate limiter for the checkout API, including tests" --available-budget-usd 0.50
+--- Golden Boy Adaptive Routing Plan: 'Implement a rate limiter for the checkout API, including tests' ---
+Task type:    implementation (complexity: MEDIUM)
+Strategy:     cost_first
+Model:        openai:gpt-4o-mini
+Fits budget:  True
+Token budget: 12 input / 28 output
+Est. cost:    $0.000019
+Fallbacks:    anthropic:claude-haiku-4-5 -> openai:gpt-4o -> anthropic:claude-sonnet-4-5 -> anthropic:claude-opus-4-1
+Reason:       cost_first: cheapest model meeting required capabilities and minimum quality 'fast' under $0.5000 budget.
+```
+
+`plan-route` is distinct from the pre-existing `goldenboy route` command: `route` previews the old
+provider-neutral `ModelTier` decision (no real pricing, no real model names unless you configure
+`.goldenboy/router.json`); `plan-route` previews the new `AdaptiveModelRouter`'s real, priced decision.
+Both exist and neither replaces the other.
+
+### Benchmark: adaptive routing vs. a pinned frontier model
+
+`scripts/benchmark_adaptive_routing.py` ran 6 tasks across 3 complexity tiers (simple/medium/complex) × 2
+task-type categories, comparing a baseline pinned to `anthropic:claude-opus-4-1` against the real
+`"adaptive"` strategy routing freely between `anthropic:claude-haiku-4-5` and `openai:gpt-4o`. Full results,
+including the method and every per-task row:
+[benchmarks/results/2026-10-02-adaptive-routing.md](benchmarks/results/2026-10-02-adaptive-routing.md).
+
+- **86.2% lower total projected cost** under adaptive ($0.040836 vs. $0.296640 across all 6 tasks) — a real
+  function of `ModelRegistry`'s real published per-1K pricing applied to real (mocked) token counts.
+- **Honest caveat, stated plainly, not dropped:** this benchmark ran with no real API keys present, so
+  *every* generation call (both conditions) went through `MockProvider`, whose output text/length does not
+  vary by which model is configured. The cost delta above is real pricing × real routing-decision logic ×
+  identical token counts — it demonstrates real complexity-driven model selection (adaptive picked
+  haiku/gpt-4o for simple/medium tasks and escalated to gpt-4o for complex ones), **not** a measured
+  quality-for-cost tradeoff, since output quality was never (and could not be) measured under a mock
+  provider.
+- **Escalation did not fire in this run** — not a gap in the test tasks, but structural: `Estimator`
+  always sizes `output_budget_tokens` at least `1.5x` the prompt's own token count, so
+  `MockProvider.generate()`'s truncation condition (`input_tokens > max_output_tokens`) can never be true on
+  a first attempt. `suggest_escalation()` itself is real and unit-tested (`tests/test_escalation.py`); this
+  benchmark simply never exercises it end-to-end, stated here rather than glossed over.
 
 ---
 
@@ -330,9 +519,15 @@ Model:        (unconfigured — map tiers to real model names in .goldenboy/rout
 Reason:       Complexity HIGH routes to 'high' (budget risk CAUTION does not constrain it further).
 ```
 
-Golden Boy ships **no real model names or pricing data** — mapping a tier to an actual model identifier is
-optional, caller-supplied config (`.goldenboy/router.json`'s `tier_models`). Unconfigured, `model_name` is
-`None`, never a guess, and the router has no dependency on any specific AI provider.
+Golden Boy ships **no real model names or pricing data** in `ModelRouter` itself — mapping a tier to an
+actual model identifier is optional, caller-supplied config (`.goldenboy/router.json`'s `tier_models`).
+Unconfigured, `model_name` is `None`, never a guess, and the router has no dependency on any specific AI
+provider.
+
+This is distinct from the newer, real-pricing-aware `AdaptiveModelRouter` (`goldenboy plan-route`) — see
+[Adaptive LLM Execution Layer](#adaptive-llm-execution-layer). Both exist; `ModelRouter` answers "what
+provider-neutral capability tier does this task need," `AdaptiveModelRouter` answers "which specific, real,
+priced model should actually handle it under this budget."
 
 ---
 
@@ -964,7 +1159,10 @@ stay a fraction of a millisecond. `SnapshotManager.create()` is the one governan
 shells out to `git` and costs tens of milliseconds accordingly — still negligible next to an actual agent
 turn (a network round-trip to an LLM provider is itself typically hundreds of milliseconds to seconds).
 Full methodology, the estimator/CLI-startup numbers' history, and an honest note on this run's machine
-load: [`BENCHMARKS.md`](BENCHMARKS.md).
+load: [`BENCHMARKS.md`](BENCHMARKS.md). For the Adaptive LLM Execution Layer's own benchmark (projected
+cost under adaptive routing vs. a pinned frontier model — a routing/pricing comparison, not a latency one),
+see [Adaptive LLM Execution Layer](#adaptive-llm-execution-layer) and
+[benchmarks/results/2026-10-02-adaptive-routing.md](benchmarks/results/2026-10-02-adaptive-routing.md).
 
 ---
 
@@ -1045,12 +1243,37 @@ than an assumption.
   least 10 real events/telemetry records exist locally — unchanged by this update.
 - Golden Boy does not replace the calling agent's own judgment or a human reviewer's — `REQUIRE_APPROVAL`
   exists to keep a human in the loop for consequential actions, not to simulate one.
+- `ModelRegistry`'s defaults are a deliberately short, conservative list (5 models: 3 Anthropic, 2 OpenAI) —
+  only entries with confidently-known published pricing/context-window figures; it will go stale as
+  providers ship new models/prices, and extending it is a caller responsibility via
+  `.goldenboy/models.json`, not something this project keeps continuously up to date for you.
+  `ProviderAdapter.generate()` also binds one adapter instance to one configured model — true per-model
+  escalation within a single provider (e.g. one `AnthropicAdapter` instance serving multiple Claude models)
+  would need a different adapter-instantiation model than exists today.
+- The Stage 5 adaptive-routing benchmark (see [Adaptive LLM Execution Layer](#adaptive-llm-execution-layer))
+  ran entirely under `MockProvider` (no API keys were available in that environment) — its cost numbers are
+  real pricing × real token counts, but it demonstrates routing/pricing behavior, not a measured
+  quality-for-cost tradeoff, and its escalation path never fired end-to-end (structural reason documented
+  there), even though `suggest_escalation()` itself is real and unit-tested.
+- `evaluate_json_schema()` implements a small, dependency-free structural subset of JSON Schema (required
+  fields + top-level type matching) — not full JSON Schema (no `$ref`, `pattern`, `minimum`, nested
+  `properties` recursion, etc.).
+- LLM-as-judge result evaluation is deliberately not built — the four deterministic evaluators
+  (`goldenboy.core.result_evaluator`) cover the cases that don't need one; this is a scope decision, not an
+  omission.
 
 ---
 
 ## Roadmap
 
-**Shipped, tested, real (this update, 2026-09-22):** cumulative, adaptive Risk Budget (`goldenboy risk`) ·
+**Shipped, tested, real (this update, 2026-10-02):** real, priced Model Registry
+(`goldenboy.core.model_registry`) · Adaptive Model Router with 3 strategies (`goldenboy.core.adaptive_router`,
+`goldenboy plan-route`) · token optimization (`goldenboy.core.token_optimizer`) · deterministic result
+evaluation (`goldenboy.core.result_evaluator`) · pure escalation suggestions (`goldenboy.core.escalation`) ·
+the `GoldenBoy` facade class composing all of the above into one governed, bounded, audited run
+(`goldenboy.goldenboy`).
+
+**Shipped, tested, real (prior update, 2026-09-22):** cumulative, adaptive Risk Budget (`goldenboy risk`) ·
 deterministic failure classification (`FailureCategory`/`classify_failure`) · Execution Trace
 (`goldenboy trace`) + documented `EventType` vocabulary.
 
@@ -1066,6 +1289,10 @@ backtesting, execution telemetry + calibration.
 | Direction | Status |
 |---|---|
 | Deep automatic wiring of the Policy Engine/Audit Log into `AdaptiveExecutor`/`budget_aware_execution` | Explicit non-goal for now — see [Design Principles](#design-principles) |
+| Per-model escalation within a single provider adapter instance | Not built — `ProviderAdapter.generate()` binds one adapter instance to one configured model; would need a different adapter-instantiation model |
+| LLM-as-judge result evaluation | Deliberately not built this stage — the 4 deterministic evaluators cover the cases that don't need one |
+| YAML config for the Adaptive LLM Execution Layer | Not added — kept JSON per the zero-runtime-dependency principle |
+| A benchmark of the Adaptive LLM Execution Layer against real (non-mock) provider calls, with real escalation triggering end-to-end | Blocked on real API keys being available in a benchmarking environment |
 | A real, populated backtest/calibration result (not `N/A`) | Blocked on real usage data accumulating locally |
 | A learned task classifier, policy, or loop/failure-similarity model | Research — needs real labeled outcome data first, same "deterministic baseline first" gate the pre-existing `TaskClassifier` already follows |
 | Cross-platform CI (macOS/Windows smoke tests) | Planned |
