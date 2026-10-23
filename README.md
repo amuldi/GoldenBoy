@@ -824,6 +824,13 @@ goldenboy doctor                                               # environment, co
 
 ---
 
+## Claude Code hook (optional)
+
+`hooks/goldenboy_hook.py` is a `UserPromptSubmit` hook that runs `goldenboy analyze` on task-sized prompts and
+adds the task type, complexity and estimated cost to the model's context automatically. It is advisory and
+fail-open (any error means no output, never a blocked prompt). Copy `hooks/settings.example.json` into your
+Claude Code `settings.json` and replace the path with the absolute path to the script.
+
 ## CLI Usage
 
 **Task intelligence & budget (pre-existing):**

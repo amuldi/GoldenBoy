@@ -51,6 +51,13 @@ _SIGNAL_KEYWORDS: List[Tuple[str, List[str], float]] = [
      0.10),
 ]
 
+# Scope phrasings with a variable middle ("across the 12 services", "across
+# auth and billing modules") that the fixed phrase list above can't enumerate.
+_CROSS_MODULE_PATTERN = re.compile(
+    r"\bacross\b(?:\s+\S+){0,4}?\s+(?:services|modules|files|repos|repositories|packages|"
+    r"components|layers|projects|apps|codebases?)\b"
+)
+
 # Below this many non-empty clauses (split on "and"/comma/semicolon), the
 # prompt reads as a single ask; at or above it, the prompt is asking for
 # several distinct things in one task -- a real scope signal independent of
@@ -92,7 +99,10 @@ def estimate_task_complexity(task_text: str) -> TaskComplexity:
     raw = 0.0
 
     for name, phrases, weight in _SIGNAL_KEYWORDS:
-        if any(re.search(r"\b" + re.escape(phrase) + r"\b", lowered) for phrase in phrases):
+        matched = any(re.search(r"\b" + re.escape(phrase) + r"\b", lowered) for phrase in phrases)
+        if name == "cross_module_keyword" and not matched:
+            matched = bool(_CROSS_MODULE_PATTERN.search(lowered))
+        if matched:
             signals.append(name)
             raw += weight
 

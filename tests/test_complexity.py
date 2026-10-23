@@ -71,3 +71,13 @@ def test_pathologically_large_prompt_does_not_hang():
     elapsed = time.perf_counter() - start
 
     assert elapsed < 2.0
+
+
+def test_variable_cross_module_phrasing_is_detected():
+    for text in ("refactor auth across the billing services", "update logging across 12 services",
+                 "rename a helper across auth and billing modules"):
+        assert "cross_module_keyword" in estimate_task_complexity(text).signals, text
+
+
+def test_across_without_a_scope_noun_is_not_cross_module():
+    assert "cross_module_keyword" not in estimate_task_complexity("spread the load across time").signals

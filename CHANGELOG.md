@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file, using the
 
 ## [Unreleased]
 
+### Upgrade pass (2026-10-23)
+
+#### Added
+- **Claude Code hook** (`hooks/goldenboy_hook.py`, `hooks/settings.example.json`): a fail-open
+  `UserPromptSubmit` hook that runs `goldenboy analyze` on task-sized prompts and injects task type,
+  complexity and estimated cost as context, so analysis no longer depends on the model remembering to run it.
+- CI: coverage floor (`--cov-fail-under=90`) in the job that installs the anthropic/openai extras; `ruff`
+  now also covers `hooks/`.
+
+#### Changed
+- `TaskClassifier`: a phrase that opens the prompt gets a fixed +3 score bonus, so "refactor X and add
+  tests" classifies as `refactor` (tests become a secondary type) instead of `testing`.
+- `estimate_task_complexity`: detects variable cross-module phrasing ("across the billing services",
+  "across auth and billing modules") via `cross_module_keyword`.
+- CLI `--budget` is validated as a percentage in (0, 100]; values such as `5000` (a token count) are rejected
+  instead of silently reading as SAFE.
+
+#### Fixed
+- `scripts/benchmark_adaptive_routing.py`: the $1 per-task budget was too small for the opus-only baseline on
+  VERY_HIGH-complexity tasks (router selected nothing); raised to $5. Results regenerated in
+  `benchmarks/results/2026-10-23-adaptive-routing.md`.
+
 ### Adaptive LLM Execution Layer: Model Registry, Adaptive Router, token optimization, result evaluation, escalation, `GoldenBoy` facade (2026-10-02)
 
 Five stages, additive, no regressions (403 -> 545 tests; pre-upgrade count held throughout).

@@ -97,7 +97,7 @@ ADAPTIVE_ADAPTERS: Dict[str, MockProvider] = {
     "openai": MockProvider(model="gpt-4o", initial_percentage=100.0),
 }
 
-_AVAILABLE_BUDGET_USD = 1.0  # generous -- the thing under test is model *choice*, not budget denial
+_AVAILABLE_BUDGET_USD = 5.0  # generous -- the thing under test is model *choice*, not budget denial
 
 
 @dataclass

@@ -3,7 +3,7 @@ import json as json_module
 import logging
 import os
 import sys
-from argparse import ArgumentParser
+from argparse import ArgumentParser, ArgumentTypeError
 from dataclasses import asdict
 
 from goldenboy.adapters.mock import MockProvider
@@ -52,6 +52,23 @@ from goldenboy.core.telemetry import (
 from goldenboy.replay.engine import run_backtest
 
 _TASK_DISPLAY_LIMIT = 100  # display-only truncation; the full text still drives the estimate
+
+
+_BUDGET_HELP = "Mock starting budget, as a percentage in (0, 100]"
+
+
+def _budget_percentage(value: str) -> float:
+    """--budget is a percentage of the session budget, not a token count; a
+    value outside (0, 100] is almost always a unit mistake, so reject it."""
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise ArgumentTypeError(f"invalid budget {value!r}: expected a number")
+    if not 0.0 < parsed <= 100.0:
+        raise ArgumentTypeError(
+            f"budget {value} is out of range: --budget is a percentage in (0, 100], not a token count"
+        )
+    return parsed
 
 
 def create_example_plan():
@@ -1073,19 +1090,19 @@ def build_parser() -> ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     p_status = subparsers.add_parser("status", help="Show current budget state and any pending checkpoint")
-    p_status.add_argument("--budget", type=float, default=100.0, help="Mock starting budget")
+    p_status.add_argument("--budget", type=_budget_percentage, default=100.0, help=_BUDGET_HELP)
     p_status.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text")
 
     p_plan = subparsers.add_parser("plan", help="Estimate a task's cost and show the resulting risk mode")
     p_plan.add_argument("task", type=str, help="The task to analyze")
-    p_plan.add_argument("--budget", type=float, default=100.0, help="Mock starting budget")
+    p_plan.add_argument("--budget", type=_budget_percentage, default=100.0, help=_BUDGET_HELP)
 
     p_run = subparsers.add_parser("run", help="Execute the example plan adaptively (demo)")
     p_run.add_argument("task", type=str, help="A label for the run (see 'plan' for a task-driven estimate)")
-    p_run.add_argument("--budget", type=float, default=100.0, help="Mock starting budget")
+    p_run.add_argument("--budget", type=_budget_percentage, default=100.0, help=_BUDGET_HELP)
 
     p_resume = subparsers.add_parser("resume", help="Resume the previous checkpoint")
-    p_resume.add_argument("--budget", type=float, default=100.0, help="Mock starting budget")
+    p_resume.add_argument("--budget", type=_budget_percentage, default=100.0, help=_BUDGET_HELP)
 
     p_doctor = subparsers.add_parser(
         "doctor", help="Check Python version, optional dependencies, config, and checkpoint state"
@@ -1096,7 +1113,7 @@ def build_parser() -> ArgumentParser:
         "analyze", help="Full task-intelligence decision: type, complexity, risk, action, and why"
     )
     p_analyze.add_argument("task", type=str, help="The task to analyze")
-    p_analyze.add_argument("--budget", type=float, default=100.0, help="Mock starting budget")
+    p_analyze.add_argument("--budget", type=_budget_percentage, default=100.0, help=_BUDGET_HELP)
     p_analyze.add_argument(
         "--progress", type=float, default=None,
         help="Reported progress on the task, 0.0-1.0 (omit if genuinely unknown)",
@@ -1225,7 +1242,7 @@ def build_parser() -> ArgumentParser:
         "route", help="Model Router: map task complexity + budget risk to a provider-neutral tier"
     )
     p_route.add_argument("task", type=str, help="The task to route")
-    p_route.add_argument("--budget", type=float, default=100.0, help="Mock starting budget")
+    p_route.add_argument("--budget", type=_budget_percentage, default=100.0, help=_BUDGET_HELP)
     p_route.add_argument(
         "--router-file", type=str, default=None,
         help="Path to a router config JSON file mapping tiers to real model names "

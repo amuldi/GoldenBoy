@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 /ABSOLUTE/PATH/TO/hooks/goldenboy_hook.py" }
+        ]
+      }
+    ]
+  }
+}

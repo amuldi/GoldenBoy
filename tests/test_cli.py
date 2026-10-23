@@ -209,3 +209,11 @@ def test_missing_task_argument_is_an_argparse_usage_error(monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         main()
     assert exc_info.value.code == 2
+
+
+def test_budget_outside_percentage_range_is_rejected(monkeypatch, capsys):
+    for bad in ("5000", "0", "-1", "abc"):
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, ["analyze", "x", "--budget", bad])
+        assert exc.value.code == 2
+    assert "percentage" in capsys.readouterr().err

@@ -102,6 +102,11 @@ _COMPILED: List[Tuple[TaskType, "re.Pattern[str]", int]] = [
 ]
 
 
+# Added to a phrase's score when it is the very first thing in the prompt
+# (after optional filler like "please"). Fixed, documented, not tuned.
+_LEADING_PHRASE_BONUS = 3
+_LEADING_FILLER = re.compile(r"^(?:please|pls|can you|could you|let's|lets)\s+", re.IGNORECASE)
+
 # A secondary type must score at least this fraction of the top type's
 # score to be reported -- otherwise a single incidental low-weight keyword
 # match (e.g. one stray "test" in an otherwise clearly ARCHITECTURE_CHANGE
@@ -142,11 +147,16 @@ class TaskClassifier:
         scores: Dict[TaskType, int] = {t: 0 for t in TaskType if t != TaskType.UNKNOWN}
         signals: Dict[str, int] = {}
 
+        # A phrase that opens the prompt names the main ask ("refactor X and
+        # add tests" is a refactor); later matches are usually supporting work.
+        lead = _LEADING_FILLER.sub("", task_text.lstrip())
+
         for task_type, pattern, weight in _COMPILED:
             matches = pattern.findall(task_text)
             if matches:
-                scores[task_type] += weight * len(matches)
-                signals[f"{task_type.value}:{pattern.pattern}"] = weight * len(matches)
+                bonus = _LEADING_PHRASE_BONUS if pattern.match(lead) else 0
+                scores[task_type] += weight * len(matches) + bonus
+                signals[f"{task_type.value}:{pattern.pattern}"] = weight * len(matches) + bonus
 
         total = sum(scores.values())
         if total == 0:

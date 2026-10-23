@@ -113,3 +113,14 @@ def test_secondary_types_are_bounded_and_ordered_by_score():
 def test_unknown_task_has_no_secondary_types():
     result = TaskClassifier().classify("zzz qqq xyzzy plugh")
     assert result.secondary_task_types == []
+
+
+def test_leading_verb_decides_the_primary_type_over_supporting_work():
+    result = TaskClassifier().classify("refactor auth module across services and add tests")
+    assert result.task_type == TaskType.REFACTOR
+    assert TaskType.TESTING in result.secondary_task_types
+
+
+def test_leading_filler_does_not_hide_the_leading_phrase():
+    result = TaskClassifier().classify("Please refactor the parser and add tests")
+    assert result.task_type == TaskType.REFACTOR
