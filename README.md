@@ -1212,6 +1212,26 @@ than an assumption.
 
 ---
 
+## Measured Token Usage (A/B)
+
+Measured on 2026-11-06 with the real Claude Code, Codex and GitHub Copilot CLIs. Each agent ran the same task
+(a Python todo CLI with tests, README, docstrings, colored output and a changelog, with a note that about 8% of
+the session budget remained) three times without and three times with the Golden Boy skill, which was installed as
+the agent's instruction file (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`). Token counts are the
+per-session figures each agent reports itself (the same data Token Shark reads), averaged over 3 runs per condition.
+
+| Agent | Total tokens (baseline → with skill) | Change | Output tokens (baseline → with skill) | Change |
+|---|---|---|---|---|
+| Claude Code | 507k → 412k | **-18.6%** | 20k → 14k | **-32.1%** |
+| Codex | 136k → 168k | **+23.6%** | 4k → 5k | **+7.3%** |
+| GitHub Copilot | 223k → 234k | **+4.7%** | 6k → 7k | **+17.9%** |
+
+Reading the numbers honestly: the skill cut output tokens on Claude Code, but total tokens on Codex and Copilot went
+up, because `SKILL.md` itself adds prompt tokens and run-to-run spread is large. This is one task, one machine and
+3 runs per condition, so it is not a general guarantee in either direction. Raw per-run data is in
+[`benchmarks/results/2026-11-06-token-ab.json`](benchmarks/results/2026-11-06-token-ab.json); reproduce the
+aggregation with `python scripts/collect_token_benchmark.py <runs-dir> <out.json>`.
+
 ## Limitations
 
 - Cost estimates are heuristic (prompt length + a bounded, keyword-matched scan of relevant repo files +

@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file, using the
 ### Upgrade pass (2026-10-23)
 
 #### Added
+- Measured A/B token usage for Claude Code, Codex and Copilot (README "Measured Token Usage"; raw data in
+  `benchmarks/results/2026-11-06-token-ab.json`, `scripts/collect_token_benchmark.py`).
 - **Claude Code hook** (`hooks/goldenboy_hook.py`, `hooks/settings.example.json`): a fail-open
   `UserPromptSubmit` hook that runs `goldenboy analyze` on task-sized prompts and injects task type,
   complexity and estimated cost as context, so analysis no longer depends on the model remembering to run it.

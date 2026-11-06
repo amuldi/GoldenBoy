@@ -677,6 +677,24 @@ explicit constructor arg  >  GOLDENBOY_* environment variable  >  .goldenboy/con
 
 ---
 
+## 📏 토큰 사용량 실측 (A/B)
+
+2026-11-06에 실제 Claude Code, Codex, GitHub Copilot CLI로 측정했습니다. 각 에이전트가 같은 과제(테스트·README·docstring·컬러 출력·changelog를
+포함한 Python todo CLI, 세션 예산 약 8% 남음 메모 포함)를 Golden Boy 스킬 없이 3회, 스킬을 지침 파일(`CLAUDE.md`, `AGENTS.md`,
+`.github/copilot-instructions.md`)로 넣고 3회 수행했습니다. 토큰 수는 각 에이전트가 직접 보고한 세션 수치(Token Shark가 읽는 것과 같은 데이터)이며
+조건당 3회 평균입니다.
+
+| 에이전트 | 총 토큰 (기준 → 스킬 적용) | 변화 | 출력 토큰 (기준 → 스킬 적용) | 변화 |
+|---|---|---|---|---|
+| Claude Code | 507k → 412k | **-18.6%** | 20k → 14k | **-32.1%** |
+| Codex | 136k → 168k | **+23.6%** | 4k → 5k | **+7.3%** |
+| GitHub Copilot | 223k → 234k | **+4.7%** | 6k → 7k | **+17.9%** |
+
+정직하게 해석하면, Claude Code에서는 출력 토큰이 줄었지만 Codex와 Copilot에서는 `SKILL.md` 자체가 프롬프트 토큰을 더하고 회차 간 편차가 커서 총 토큰이
+늘었습니다. 한 과제·한 머신·조건당 3회이므로 어느 방향으로도 일반적인 보장은 아닙니다. 회차별 원자료는
+[`benchmarks/results/2026-11-06-token-ab.json`](benchmarks/results/2026-11-06-token-ab.json)에 있고, 집계는
+`python scripts/collect_token_benchmark.py <runs-dir> <out.json>`으로 재현할 수 있습니다.
+
 ## ⚠️ 한계
 
 - 비용 추정치는 휴리스틱(프롬프트 길이 + 제한된 저장소 스캔)이며 — 과금 보증이 아니고, 에이전트가 실제로 컨텍스트에 로드할 내용의 모델도 아닙니다.

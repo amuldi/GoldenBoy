@@ -1,0 +1,458 @@
+{
+  "runs": [
+    {
+      "run": 1,
+      "tool": "claude",
+      "arm": "base",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "requirements-dev.txt",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 16889,
+      "fresh_input": 46359,
+      "cached_input": 602111,
+      "turns": 14,
+      "cost_usd": 0.02373461,
+      "total": 665359
+    },
+    {
+      "run": 1,
+      "tool": "claude",
+      "arm": "skill",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 11313,
+      "fresh_input": 42657,
+      "cached_input": 263381,
+      "turns": 11,
+      "cost_usd": 0.01682031,
+      "total": 317351
+    },
+    {
+      "run": 1,
+      "tool": "codex",
+      "arm": "base",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 4706,
+      "fresh_input": 20655,
+      "cached_input": 152576,
+      "turns": 1,
+      "total": 177937
+    },
+    {
+      "run": 1,
+      "tool": "codex",
+      "arm": "skill",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 3928,
+      "fresh_input": 17942,
+      "cached_input": 94720,
+      "turns": 1,
+      "total": 116590
+    },
+    {
+      "run": 1,
+      "tool": "copilot",
+      "arm": "base",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 6718,
+      "fresh_input": 21072,
+      "cached_input": 143653,
+      "total": 171443
+    },
+    {
+      "run": 1,
+      "tool": "copilot",
+      "arm": "skill",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 5906,
+      "fresh_input": 22653,
+      "cached_input": 154379,
+      "total": 182938
+    },
+    {
+      "run": 2,
+      "tool": "claude",
+      "arm": "base",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 22464,
+      "fresh_input": 52297,
+      "cached_input": 341305,
+      "turns": 11,
+      "cost_usd": 0.025102850000000003,
+      "total": 416066
+    },
+    {
+      "run": 2,
+      "tool": "claude",
+      "arm": "skill",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "goldenboy_checkpoint.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 15229,
+      "fresh_input": 46555,
+      "cached_input": 421989,
+      "turns": 10,
+      "cost_usd": 0.02114339,
+      "total": 483773
+    },
+    {
+      "run": 2,
+      "tool": "codex",
+      "arm": "base",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 4095,
+      "fresh_input": 19443,
+      "cached_input": 82432,
+      "turns": 1,
+      "total": 105970
+    },
+    {
+      "run": 2,
+      "tool": "codex",
+      "arm": "skill",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "goldenboy_checkpoint.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 4467,
+      "fresh_input": 26895,
+      "cached_input": 137472,
+      "turns": 1,
+      "total": 168834
+    },
+    {
+      "run": 2,
+      "tool": "copilot",
+      "arm": "base",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 5012,
+      "fresh_input": 11391,
+      "cached_input": 230674,
+      "total": 247077
+    },
+    {
+      "run": 2,
+      "tool": "copilot",
+      "arm": "skill",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 10208,
+      "fresh_input": 18881,
+      "cached_input": 287191,
+      "total": 316280
+    },
+    {
+      "run": 3,
+      "tool": "claude",
+      "arm": "base",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 21307,
+      "fresh_input": 51481,
+      "cached_input": 366497,
+      "turns": 16,
+      "cost_usd": 0.02461287,
+      "total": 439285
+    },
+    {
+      "run": 3,
+      "tool": "claude",
+      "arm": "skill",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "goldenboy_checkpoint.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 14620,
+      "fresh_input": 46340,
+      "cached_input": 375307,
+      "turns": 13,
+      "cost_usd": 0.020329270000000003,
+      "total": 436267
+    },
+    {
+      "run": 3,
+      "tool": "codex",
+      "arm": "base",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 3957,
+      "fresh_input": 17401,
+      "cached_input": 102656,
+      "turns": 1,
+      "total": 124014
+    },
+    {
+      "run": 3,
+      "tool": "codex",
+      "arm": "skill",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "goldenboy_checkpoint.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 5291,
+      "fresh_input": 27204,
+      "cached_input": 186112,
+      "turns": 1,
+      "total": 218607
+    },
+    {
+      "run": 3,
+      "tool": "copilot",
+      "arm": "base",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 5769,
+      "fresh_input": 11825,
+      "cached_input": 233541,
+      "total": 251135
+    },
+    {
+      "run": 3,
+      "tool": "copilot",
+      "arm": "skill",
+      "deliverables": [
+        "CHANGELOG.md",
+        "README.md",
+        "test_todo.py",
+        "todo.py"
+      ],
+      "output": 4514,
+      "fresh_input": 12929,
+      "cached_input": 184146,
+      "total": 201589
+    }
+  ],
+  "summary": {
+    "claude": {
+      "base": {
+        "n": 3,
+        "output": {
+          "mean": 20220,
+          "min": 16889,
+          "max": 22464
+        },
+        "fresh_input": {
+          "mean": 50045.666666666664,
+          "min": 46359,
+          "max": 52297
+        },
+        "cached_input": {
+          "mean": 436637.6666666667,
+          "min": 341305,
+          "max": 602111
+        },
+        "total": {
+          "mean": 506903.3333333333,
+          "min": 416066,
+          "max": 665359
+        },
+        "deliverables": 4.333333333333333
+      },
+      "skill": {
+        "n": 3,
+        "output": {
+          "mean": 13720.666666666666,
+          "min": 11313,
+          "max": 15229
+        },
+        "fresh_input": {
+          "mean": 45184,
+          "min": 42657,
+          "max": 46555
+        },
+        "cached_input": {
+          "mean": 353559,
+          "min": 263381,
+          "max": 421989
+        },
+        "total": {
+          "mean": 412463.6666666667,
+          "min": 317351,
+          "max": 483773
+        },
+        "deliverables": 4.666666666666667
+      },
+      "output_change_pct": -32.1,
+      "fresh_input_change_pct": -9.7,
+      "total_change_pct": -18.6
+    },
+    "codex": {
+      "base": {
+        "n": 3,
+        "output": {
+          "mean": 4252.666666666667,
+          "min": 3957,
+          "max": 4706
+        },
+        "fresh_input": {
+          "mean": 19166.333333333332,
+          "min": 17401,
+          "max": 20655
+        },
+        "cached_input": {
+          "mean": 112554.66666666667,
+          "min": 82432,
+          "max": 152576
+        },
+        "total": {
+          "mean": 135973.66666666666,
+          "min": 105970,
+          "max": 177937
+        },
+        "deliverables": 4
+      },
+      "skill": {
+        "n": 3,
+        "output": {
+          "mean": 4562,
+          "min": 3928,
+          "max": 5291
+        },
+        "fresh_input": {
+          "mean": 24013.666666666668,
+          "min": 17942,
+          "max": 27204
+        },
+        "cached_input": {
+          "mean": 139434.66666666666,
+          "min": 94720,
+          "max": 186112
+        },
+        "total": {
+          "mean": 168010.33333333334,
+          "min": 116590,
+          "max": 218607
+        },
+        "deliverables": 4.666666666666667
+      },
+      "output_change_pct": 7.3,
+      "fresh_input_change_pct": 25.3,
+      "total_change_pct": 23.6
+    },
+    "copilot": {
+      "base": {
+        "n": 3,
+        "output": {
+          "mean": 5833,
+          "min": 5012,
+          "max": 6718
+        },
+        "fresh_input": {
+          "mean": 14762.666666666666,
+          "min": 11391,
+          "max": 21072
+        },
+        "cached_input": {
+          "mean": 202622.66666666666,
+          "min": 143653,
+          "max": 233541
+        },
+        "total": {
+          "mean": 223218.33333333334,
+          "min": 171443,
+          "max": 251135
+        },
+        "deliverables": 4
+      },
+      "skill": {
+        "n": 3,
+        "output": {
+          "mean": 6876,
+          "min": 4514,
+          "max": 10208
+        },
+        "fresh_input": {
+          "mean": 18154.333333333332,
+          "min": 12929,
+          "max": 22653
+        },
+        "cached_input": {
+          "mean": 208572,
+          "min": 154379,
+          "max": 287191
+        },
+        "total": {
+          "mean": 233602.33333333334,
+          "min": 182938,
+          "max": 316280
+        },
+        "deliverables": 4
+      },
+      "output_change_pct": 17.9,
+      "fresh_input_change_pct": 23.0,
+      "total_change_pct": 4.7
+    }
+  }
+}
