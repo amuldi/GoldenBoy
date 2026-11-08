@@ -1,0 +1,241 @@
+{
+ "date": "2026-11-08",
+ "method": {
+  "task": "Usage note: about 8% of your session usage budget remains.\nTask: in the current directory build a small Python todo CLI. Requirements: todo.py with add/list/done/delete commands and JSON file persistence; pytest tests for every command; a README with usage examples; type hints and docstrings everywhere; colored terminal output with a --json flag; a CHANGELOG.md. Work autonomously, do not ask questions.",
+  "command": "codex exec --json -s workspace-write --skip-git-repo-check --ephemeral -C . \"$(cat task.txt)\" (timeout 420s)",
+  "codex_cli": "0.153.4",
+  "arms": {
+   "base": "no instruction file",
+   "skill": "skills/goldenboy/SKILL.md copied as AGENTS.md",
+   "compact": "skills/goldenboy/AGENTS.codex.md copied as AGENTS.md"
+  },
+  "order": "interleaved base, skill, compact for runs 1..3",
+  "usage_source": "turn.completed.usage events in codex exec --json output (same parsing as scripts/collect_token_benchmark.py)"
+ },
+ "runs": [
+  {
+   "run": 1,
+   "tool": "codex",
+   "arm": "base",
+   "deliverables": [
+    "CHANGELOG.md",
+    "README.md",
+    "test_todo.py",
+    "todo.py"
+   ],
+   "output": 4829,
+   "fresh_input": 22262,
+   "cached_input": 121856,
+   "turns": 1,
+   "total": 148947
+  },
+  {
+   "run": 1,
+   "tool": "codex",
+   "arm": "compact",
+   "deliverables": [
+    "CHANGELOG.md",
+    "README.md",
+    "test_todo.py",
+    "todo.py"
+   ],
+   "output": 2986,
+   "fresh_input": 17325,
+   "cached_input": 65280,
+   "turns": 1,
+   "total": 85591
+  },
+  {
+   "run": 1,
+   "tool": "codex",
+   "arm": "skill",
+   "deliverables": [
+    "CHANGELOG.md",
+    "README.md",
+    "test_todo.py",
+    "todo.py"
+   ],
+   "output": 4251,
+   "fresh_input": 23736,
+   "cached_input": 125952,
+   "turns": 1,
+   "total": 153939
+  },
+  {
+   "run": 2,
+   "tool": "codex",
+   "arm": "base",
+   "deliverables": [
+    "CHANGELOG.md",
+    "README.md",
+    "test_todo.py",
+    "todo.py"
+   ],
+   "output": 4534,
+   "fresh_input": 16895,
+   "cached_input": 103680,
+   "turns": 1,
+   "total": 125109
+  },
+  {
+   "run": 2,
+   "tool": "codex",
+   "arm": "compact",
+   "deliverables": [
+    "CHANGELOG.md",
+    "README.md",
+    "test_todo.py",
+    "todo.py"
+   ],
+   "output": 2935,
+   "fresh_input": 19585,
+   "cached_input": 45312,
+   "turns": 1,
+   "total": 67832
+  },
+  {
+   "run": 2,
+   "tool": "codex",
+   "arm": "skill",
+   "deliverables": [
+    "CHANGELOG.md",
+    "README.md",
+    "test_todo.py",
+    "todo.py"
+   ],
+   "output": 4740,
+   "fresh_input": 26910,
+   "cached_input": 104960,
+   "turns": 1,
+   "total": 136610
+  },
+  {
+   "run": 3,
+   "tool": "codex",
+   "arm": "base",
+   "deliverables": [
+    "CHANGELOG.md",
+    "README.md",
+    "test_todo.py",
+    "todo.py"
+   ],
+   "output": 5866,
+   "fresh_input": 15113,
+   "cached_input": 148224,
+   "turns": 1,
+   "total": 169203
+  },
+  {
+   "run": 3,
+   "tool": "codex",
+   "arm": "compact",
+   "deliverables": [
+    "CHANGELOG.md",
+    "README.md",
+    "test_todo.py",
+    "todo.py"
+   ],
+   "output": 3153,
+   "fresh_input": 13922,
+   "cached_input": 68352,
+   "turns": 1,
+   "total": 85427
+  },
+  {
+   "run": 3,
+   "tool": "codex",
+   "arm": "skill",
+   "deliverables": [
+    "CHANGELOG.md",
+    "README.md",
+    "goldenboy_checkpoint.md",
+    "test_todo.py",
+    "todo.py"
+   ],
+   "output": 4497,
+   "fresh_input": 24059,
+   "cached_input": 129024,
+   "turns": 1,
+   "total": 157580
+  }
+ ],
+ "summary": {
+  "base": {
+   "n": 3,
+   "output": {
+    "mean": 5076.333333333333,
+    "min": 4534,
+    "max": 5866
+   },
+   "fresh_input": {
+    "mean": 18090,
+    "min": 15113,
+    "max": 22262
+   },
+   "cached_input": {
+    "mean": 124586.66666666667,
+    "min": 103680,
+    "max": 148224
+   },
+   "total": {
+    "mean": 147753,
+    "min": 125109,
+    "max": 169203
+   },
+   "checkpoint_files": 0
+  },
+  "skill": {
+   "n": 3,
+   "output": {
+    "mean": 4496,
+    "min": 4251,
+    "max": 4740
+   },
+   "fresh_input": {
+    "mean": 24901.666666666668,
+    "min": 23736,
+    "max": 26910
+   },
+   "cached_input": {
+    "mean": 119978.66666666667,
+    "min": 104960,
+    "max": 129024
+   },
+   "total": {
+    "mean": 149376.33333333334,
+    "min": 136610,
+    "max": 157580
+   },
+   "checkpoint_files": 1,
+   "total_change_pct_vs_base": 1.1,
+   "output_change_pct_vs_base": -11.4
+  },
+  "compact": {
+   "n": 3,
+   "output": {
+    "mean": 3024.6666666666665,
+    "min": 2935,
+    "max": 3153
+   },
+   "fresh_input": {
+    "mean": 16944,
+    "min": 13922,
+    "max": 19585
+   },
+   "cached_input": {
+    "mean": 59648,
+    "min": 45312,
+    "max": 68352
+   },
+   "total": {
+    "mean": 79616.66666666667,
+    "min": 67832,
+    "max": 85591
+   },
+   "checkpoint_files": 0,
+   "total_change_pct_vs_base": -46.1,
+   "output_change_pct_vs_base": -40.4
+  }
+ },
+ "checks": "pytest passed in all 9 run directories; every compact run delivered add/list/done/delete, JSON persistence, --json, colored output, type hints and docstrings on every function, README examples and CHANGELOG.md"
+}

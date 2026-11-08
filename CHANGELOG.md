@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file, using the
 
 ## [Unreleased]
 
+### Codex instruction file (2026-11-08)
+
+#### Added
+- `skills/goldenboy/AGENTS.codex.md`: a 1.2 KB Codex-specific instruction file (same modes and priorities;
+  checkpoint only when requested work is unfinished; no invented extra work). Re-measured against the baseline
+  and the full `SKILL.md`, 3 interleaved runs each: total tokens -46.1% vs. baseline with all requested items
+  delivered (README "Measured Token Usage" follow-up; raw data in `benchmarks/results/2026-11-08-codex-compact.json`).
+
 ### Upgrade pass (2026-10-23)
 
 #### Added

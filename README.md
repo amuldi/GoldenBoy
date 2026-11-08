@@ -1232,6 +1232,31 @@ up, because `SKILL.md` itself adds prompt tokens and run-to-run spread is large.
 [`benchmarks/results/2026-11-06-token-ab.json`](benchmarks/results/2026-11-06-token-ab.json); reproduce the
 aggregation with `python scripts/collect_token_benchmark.py <runs-dir> <out.json>`.
 
+### Follow-up: a Codex-specific instruction file (2026-11-08)
+
+Reading the Codex runs above, two of the three skill runs finished every requested item and then still wrote
+`goldenboy_checkpoint.md`, listing "deferred" work nobody had asked for (packaging, shell completion, ...).
+`SKILL.md` (5.7 KB, including a Claude Code–specific section) tells the agent to create that file once the safe
+work is done, and Codex followed it literally.
+
+[`skills/goldenboy/AGENTS.codex.md`](skills/goldenboy/AGENTS.codex.md) keeps the same modes and priorities in
+1.2 KB, allows a checkpoint only when requested work is actually unfinished, and tells the agent not to invent
+extra work. Re-measured on 2026-11-08 with the same task, the same `codex exec --json -s workspace-write
+--ephemeral` command and the same 420 s limit, 3 runs per arm, interleaved:
+
+| Codex arm | Total tokens (mean, min–max) | vs. baseline | Output tokens | Checkpoint file |
+|---|---|---|---|---|
+| Baseline (no instruction file) | 148k (125k–169k) | — | 5.1k | 0/3 |
+| `SKILL.md` as `AGENTS.md` | 149k (137k–158k) | +1.1% | 4.5k | 1/3 |
+| `AGENTS.codex.md` as `AGENTS.md` | 80k (68k–86k) | **-46.1%** | 3.0k | 0/3 |
+
+Tests pass in all 9 runs, and every `AGENTS.codex.md` run delivered all requested items (four commands, JSON
+persistence, `--json`, colored output, type hints and docstrings on every function, README examples, a changelog);
+its READMEs were somewhat shorter than the baseline's. The full `SKILL.md` measured +1.1% here versus +23.6% on
+2026-11-06 — run-to-run spread is large, so read any single figure as indicative, not guaranteed. Raw per-run data:
+[`benchmarks/results/2026-11-08-codex-compact.json`](benchmarks/results/2026-11-08-codex-compact.json). To use it
+with Codex, copy `skills/goldenboy/AGENTS.codex.md` into your project as `AGENTS.md`.
+
 ## Limitations
 
 - Cost estimates are heuristic (prompt length + a bounded, keyword-matched scan of relevant repo files +

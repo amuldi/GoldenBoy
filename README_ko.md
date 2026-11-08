@@ -695,6 +695,28 @@ explicit constructor arg  >  GOLDENBOY_* environment variable  >  .goldenboy/con
 [`benchmarks/results/2026-11-06-token-ab.json`](benchmarks/results/2026-11-06-token-ab.json)에 있고, 집계는
 `python scripts/collect_token_benchmark.py <runs-dir> <out.json>`으로 재현할 수 있습니다.
 
+### 후속 측정: Codex 전용 안내 파일 (2026-11-08)
+
+위 Codex 결과를 보면, 스킬을 넣은 3회 중 2회가 요청한 일을 모두 끝낸 뒤에도 `goldenboy_checkpoint.md`를 만들고
+아무도 요청하지 않은 "미룬 작업"(패키징, 셸 자동완성 등)을 적었습니다. `SKILL.md`(5.7KB, Claude Code 전용 설명 포함)가
+"안전한 작업이 끝나면 이 파일을 만들라"고 지시하고, Codex가 그대로 따른 것입니다.
+
+[`skills/goldenboy/AGENTS.codex.md`](skills/goldenboy/AGENTS.codex.md)는 같은 모드·우선순위 규칙을 1.2KB에 담고,
+요청한 일이 실제로 남았을 때만 체크포인트를 만들게 하며, 요청에 없는 작업을 지어내지 않게 합니다. 2026-11-08에 같은 과제,
+같은 `codex exec --json -s workspace-write --ephemeral` 명령, 같은 420초 제한으로 조건당 3회씩 번갈아 다시 측정했습니다.
+
+| Codex 조건 | 총 토큰 (평균, 최소–최대) | 기준 대비 | 출력 토큰 | 체크포인트 파일 |
+|---|---|---|---|---|
+| 기준 (안내 파일 없음) | 148k (125k–169k) | — | 5.1k | 0/3 |
+| `SKILL.md`를 `AGENTS.md`로 | 149k (137k–158k) | +1.1% | 4.5k | 1/3 |
+| `AGENTS.codex.md`를 `AGENTS.md`로 | 80k (68k–86k) | **-46.1%** | 3.0k | 0/3 |
+
+9회 모두 테스트를 통과했고, `AGENTS.codex.md` 3회는 요청 항목(명령 4개, JSON 저장, `--json`, 컬러 출력, 모든 함수의
+타입 힌트·docstring, README 예시, 변경 기록)을 모두 지켰습니다. README는 기준보다 조금 짧았습니다. 전체 `SKILL.md`는
+이번에 +1.1%로 2026-11-06의 +23.6%와 차이가 커서, 회차 간 편차가 크다는 점을 감안해 하나의 수치를 보장으로 읽지 마세요.
+회차별 원자료: [`benchmarks/results/2026-11-08-codex-compact.json`](benchmarks/results/2026-11-08-codex-compact.json).
+Codex에서 쓰려면 `skills/goldenboy/AGENTS.codex.md`를 프로젝트에 `AGENTS.md`로 복사하세요.
+
 ## ⚠️ 한계
 
 - 비용 추정치는 휴리스틱(프롬프트 길이 + 제한된 저장소 스캔)이며 — 과금 보증이 아니고, 에이전트가 실제로 컨텍스트에 로드할 내용의 모델도 아닙니다.
