@@ -1113,7 +1113,9 @@ npm run typecheck && npm run build && npm test
 
 ## Testing
 
-- **448 Python tests** (`pytest`), **93% line coverage** — up from 403 tests / 94% before this update; 45
+- **554 Python tests passing, 93% line coverage** (re-run 2026-11-08 with the `anthropic`/`openai` extras installed,
+  same as the CI coverage job). Without those extras: 526 passed, 4 skipped, 89%.
+- At the risk-budget update: 448 tests / 93% — up from 403 tests / 94% before that update; 45
   new tests cover `goldenboy.core.risk_budget` (new module), failure classification, and execution trace
   (`tests/test_risk_budget.py`, plus additions to `test_failure_memory.py`, `test_audit.py`,
   `test_cli_governance.py`, `test_public_api.py`, `test_benchmark.py`).

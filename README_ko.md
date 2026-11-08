@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://github.com/amuldi/GoldenBoy/actions/workflows/ci.yml/badge.svg" alt="CI status">
   <img src="https://img.shields.io/badge/python-3.9--3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.9–3.13">
-  <img src="https://img.shields.io/badge/coverage-95%25-2ea44f?style=flat-square" alt="Coverage 95%">
+  <img src="https://img.shields.io/badge/coverage-93%25-2ea44f?style=flat-square" alt="Coverage 93%">
   <img src="https://img.shields.io/badge/dependencies-zero-2ea44f?style=flat-square" alt="Zero required dependencies">
   <img src="https://img.shields.io/badge/TypeScript_SDK-node_%3E%3D18-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript SDK, Node >= 18">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT license"></a>
@@ -733,8 +733,9 @@ Codex에서 쓰려면 `skills/goldenboy/AGENTS.codex.md`를 프로젝트에 `AGE
 
 Golden Boy v1.1.0은 2026-09-14 기준으로 다음을 통해 검증되었습니다:
 
-- **Python 테스트 186개**, 95% 라인 커버리지(`pytest --cov`) — v1.0.0의 88개 테스트/93%에서 증가
-- **TypeScript 테스트 14개**(`sdk/typescript`에서 `npm test`), 실제 설치된 CLI에 대한 실제(모킹 없는) 통합 테스트 포함
+- **Python 테스트 554개 통과, 라인 커버리지 93%** (2026-11-08 재실행, CI 커버리지 작업과 같이 `anthropic`/`openai` extras 설치). extras 없이 돌리면 526개 통과·4개 건너뜀·89%
+- v1.1.0 당시: Python 테스트 186개, 95% — v1.0.0의 88개 테스트/93%에서 증가
+- **TypeScript 테스트 21개**(`sdk/typescript`에서 `npm test`, 2026-11-08 기준), 실제 설치된 CLI에 대한 실제(모킹 없는) 통합 테스트 포함
 - Ruff와 mypy 클린(mypy는 1.19.1과 2.3.1 양쪽에서 확인)
 - `pip-audit`: 알려진 취약점 0개
 - Python 3.9–3.13, GitHub Actions에서
